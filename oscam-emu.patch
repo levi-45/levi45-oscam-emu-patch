@@ -1037,8 +1037,23 @@ index a4883f5d..47928a3b 100644
  
  	reader->handle = open(reader->device,  O_RDWR | O_NOCTTY | O_NONBLOCK);
  	if(reader->handle < 0)
+diff --git a/extapi/coolapi.h b/extapi/coolapi.h
+index 2b26ae33..7fb1d7ca 100644
+--- a/extapi/coolapi.h
++++ b/extapi/coolapi.h
+@@ -223,8 +223,8 @@ do { \
+ 			__LINE__ , \
+ 			label, \
+ 			ret, \
+-			ret >= CNXT_STATUS_ERRORS ? "UNKNOWN" : "CNXT_STATUS_", \
+-			ret >= CNXT_STATUS_ERRORS ? ""        : cnxt_status[ret] \
++			ret > CNXT_STATUS_ERRORS ? "UNKNOWN" : "CNXT_STATUS_", \
++			ret > CNXT_STATUS_ERRORS ? ""        : cnxt_status[ret] \
+ 		); \
+ 	} \
+ } while(0)
 diff --git a/globals.h b/globals.h
-index 78c3a90b..9835ffec 100644
+index 0aaad84b..9835ffec 100644
 --- a/globals.h
 +++ b/globals.h
 @@ -234,7 +234,7 @@
@@ -1060,7 +1075,7 @@ index 78c3a90b..9835ffec 100644
 -#define BOARD_URL				"https://board.streamboard.tv"
 +#define BOARD_URL				"https://github.com/oscam-mirror/oscam-emu/discussions"
  #ifndef CS_VERSION
- #define CS_VERSION				"2.26.01-11925"
+ #define CS_VERSION				"2.26.01-11926"
  #endif
  #ifndef CS_GIT_COMMIT
  #define CS_GIT_COMMIT			"a2b4c6d8"
@@ -1568,7 +1583,7 @@ index 2adf4518..76f0a6ff 100644
  			ErrorCode = oscam_sttkd_KeyWrite(tkd_desc_info[demux[demux_id].dev_index].key_hndl, l, cw + (l * 8));
  
 diff --git a/module-dvbapi.c b/module-dvbapi.c
-index 7fa6edd7..e349e52d 100644
+index 420a7ff8..e349e52d 100644
 --- a/module-dvbapi.c
 +++ b/module-dvbapi.c
 @@ -1887,7 +1887,14 @@ void dvbapi_start_emm_filter(int32_t demux_id)
@@ -1722,15 +1737,40 @@ index 7fa6edd7..e349e52d 100644
  	{
  		dvbapi_start_pmt_filter(demux_id);
  	}
-@@ -5587,6 +5680,7 @@ void dvbapi_process_input(int32_t demux_id, int32_t filter_num, uint8_t *buffer,
- 	if(filtertype == TYPE_ECM)
+@@ -5584,9 +5677,10 @@ void dvbapi_process_input(int32_t demux_id, int32_t filter_num, uint8_t *buffer,
+ 		return;
+ 	}
+ 
+-	if(filtertype == TYPE_ECM && curpid)
++	if(filtertype == TYPE_ECM)
  	{
  		uint32_t chid = 0x10000;
 +		int8_t pvu_skip = 0;
  		ECM_REQUEST *er;
  
  		if(len != 0) // len = 0 receiver encountered an internal bufferoverflow!
-@@ -5616,8 +5710,25 @@ void dvbapi_process_input(int32_t demux_id, int32_t filter_num, uint8_t *buffer,
+@@ -5599,21 +5693,42 @@ void dvbapi_process_input(int32_t demux_id, int32_t filter_num, uint8_t *buffer,
+ 				cs_log_dbg(D_DVBAPI, "Received data with total length 0x%03X but max supported ECM length is 0x%03X -> Please report!",
+ 					sctlen, MAX_ECM_SIZE);
+ 
+-				curpid->tries -= 0x0E;
+-
++				if(curpid)
++				{
++					curpid->tries -= 0x0E;
++				}
+ 				return;
+ 			}
+ 
+ 			if(!(buffer[0] == 0x80 || buffer[0] == 0x81))
+ 			{
+ 				cs_log_dbg(D_DVBAPI, "Received an ECM with invalid ecmtable ID %02X -> ignoring!", buffer[0]);
+-				curpid->tries--;
+-
++				if(curpid)
++				{
++					curpid->tries--;
++				}
  				return;
  			}
  
@@ -1757,7 +1797,7 @@ index 7fa6edd7..e349e52d 100644
  			{
  				if(!(er = get_ecmtask()))
  				{
-@@ -5961,6 +6072,35 @@ void dvbapi_process_input(int32_t demux_id, int32_t filter_num, uint8_t *buffer,
+@@ -5957,6 +6072,35 @@ void dvbapi_process_input(int32_t demux_id, int32_t filter_num, uint8_t *buffer,
  			return; // just skip on internal buffer overflow
  		}
  
@@ -1793,7 +1833,7 @@ index 7fa6edd7..e349e52d 100644
  		// fix to handle more than one irdeto emm packet
  		uint8_t *pbuf = buffer;
  		int32_t done = 0;
-@@ -7190,8 +7330,10 @@ void dvbapi_write_cw(int32_t demux_id, int32_t pid, int32_t stream_id, uint8_t *
+@@ -7186,8 +7330,10 @@ void dvbapi_write_cw(int32_t demux_id, int32_t pid, int32_t stream_id, uint8_t *
  	for(n = 0; n < 2; n++)
  	{
  		// Check if cw has changed and if new cw is empty (all zeros)
@@ -1805,7 +1845,7 @@ index 7fa6edd7..e349e52d 100644
  		{
  			// prepare ca device
  			uint32_t idx = dvbapi_ca_set_pid(demux_id, pid, stream_id, (algo == CA_ALGO_DES), msgid);
-@@ -7483,7 +7625,9 @@ void dvbapi_send_dcw(struct s_client *client, ECM_REQUEST *er)
+@@ -7479,7 +7625,9 @@ void dvbapi_send_dcw(struct s_client *client, ECM_REQUEST *er)
  
  		// 0=matching ecm hash, 2=no filter, 3=table reset, 4=cache-ex response
  		// Check only against last_cw[0] (index 0) - No need to check the rest
@@ -1816,7 +1856,21 @@ index 7fa6edd7..e349e52d 100644
  		{
  			// check for matching control word
  			if(memcmp(er->cw, demux[i].last_cw[0][0], 8) == 0 &&
-@@ -8486,7 +8630,9 @@ int32_t dvbapi_check_ecm_delayed_delivery(int32_t demux_id, ECM_REQUEST *er)
+@@ -8221,11 +8369,10 @@ int32_t dvbapi_set_section_filter(int32_t demux_id, ECM_REQUEST *er, int32_t n)
+ 	struct s_ecmpid *curpid = NULL;
+ 
+ 	int32_t pid = demux[demux_id].demux_fd[n].pidindex;
+-	if(pid == -1)
++	if(pid != -1)
+ 	{
+-		return -1;
++		curpid = &demux[demux_id].ECMpids[pid];
+ 	}
+-	curpid = &demux[demux_id].ECMpids[pid];
+ 
+ 	if(curpid->table != er->ecm[0] && curpid->table != 0)
+ 	{
+@@ -8483,7 +8630,9 @@ int32_t dvbapi_check_ecm_delayed_delivery(int32_t demux_id, ECM_REQUEST *er)
  	}
  
  	// Check for null cw
@@ -12851,6 +12905,20 @@ index f43ff557..2f0e1b16 100644
  #endif // MODULE_STREAMRELAY
  
  #endif // MODULE_STREAMRELAY_H_
+diff --git a/module-webif-lib.c b/module-webif-lib.c
+index 253adba0..9fcd65c4 100644
+--- a/module-webif-lib.c
++++ b/module-webif-lib.c
+@@ -686,8 +686,8 @@ int8_t get_stats_linux(const pid_t pid, struct pstat* result)
+ 				break;
+ 			}
+ 		}
+-		fclose(fd);
+ 	}
++	fclose(fd);
+ 
+ 	// read processes from /proc
+ 	uint info_procs = 0;
 diff --git a/module-webif-tpl.c b/module-webif-tpl.c
 index 7ca98749..66ce02a9 100644
 --- a/module-webif-tpl.c
@@ -12872,7 +12940,7 @@ index 7ca98749..66ce02a9 100644
  										if(ok == 0)
  										{
 diff --git a/module-webif.c b/module-webif.c
-index 3494942a..2a2965ce 100644
+index 38ff335c..2a2965ce 100644
 --- a/module-webif.c
 +++ b/module-webif.c
 @@ -137,8 +137,9 @@ static bool use_srvid2 = false;
@@ -13021,7 +13089,21 @@ index 3494942a..2a2965ce 100644
  		for(i = 0; i < MAX_DEBUG_LEVELS; i++)
  		{
  			lvl = 1 << i;
-@@ -6995,7 +7052,6 @@ static char *send_oscam_services(struct templatevars * vars, struct uriparams *
+@@ -6859,10 +6916,11 @@ static char *send_oscam_services_edit(struct templatevars * vars, struct uripara
+ 		for(sidtab = cfg.sidtab; sidtab != NULL && strcmp(label, sidtab->label) != 0; sidtab = sidtab->next) { ; }
+ 	}
+ 
++	tpl_addVar(vars, TPLADD, "LABEL", xml_encode(vars, sidtab->label));
++	tpl_addVar(vars, TPLADD, "LABELENC", urlencode(vars, sidtab->label));
++
+ 	if(sidtab)
+ 	{
+-		tpl_addVar(vars, TPLADD, "LABEL", xml_encode(vars, sidtab->label));
+-		tpl_addVar(vars, TPLADD, "LABELENC", urlencode(vars, sidtab->label));
+ #ifdef CS_CACHEEX_AIO
+ 		tpl_addVar(vars, TPLADD, "DCRCCHECKED", (sidtab->disablecrccws_only_for_exception == 1) ? "checked" : "" );
+ 		tpl_addVar(vars, TPLADD, "NWCHECKED", (sidtab->no_wait_time == 1) ? "checked" : "" );
+@@ -6994,7 +7052,6 @@ static char *send_oscam_services(struct templatevars * vars, struct uriparams *
  	while(sidtab != NULL)
  	{
  		tpl_addVar(vars, TPLADD, "SID", "");
@@ -13029,7 +13111,80 @@ index 3494942a..2a2965ce 100644
  		if((strcmp(getParam(params, "service"), sidtab->label) == 0) && (strcmp(getParam(params, "action"), "list") == 0))
  		{
  			tpl_addVar(vars, TPLADD, "SIDCLASS", "sidlist");
-@@ -7391,6 +7447,9 @@ static char *send_oscam_files(struct templatevars * vars, struct uriparams * par
+@@ -7140,7 +7197,7 @@ static char *send_oscam_script(struct templatevars * vars, struct uriparams * pa
+ 			{
+ 				if(s.st_mode & S_IXUSR)
+ 				{
+-					int32_t rc = -1;
++					int32_t rc;
+ 					FILE *fp;
+ 					char buf[256];
+ 
+@@ -7151,15 +7208,14 @@ static char *send_oscam_script(struct templatevars * vars, struct uriparams * pa
+ 					}
+ 
+ 					fp = popen(system_str, "r");
+-					if (fp)
++
++					while (fgets(buf, sizeof(buf), fp) != NULL)
+ 					{
+-						while (fgets(buf, sizeof(buf), fp) != NULL)
+-						{
+-							tpl_addVar(vars, TPLAPPEND, "SCRIPTRESULTOUT", buf);
+-						}
+-						rc = pclose(fp)/256;
++						tpl_addVar(vars, TPLAPPEND, "SCRIPTRESULTOUT", buf);
+ 					}
+ 
++					rc = pclose(fp)/256;
++
+ 					tpl_printf(vars, TPLAPPEND, "CODE", "returncode: %d", rc);
+ 					tpl_printf(vars, TPLADD, "SCRIPTNAME", "scriptname: %s", scriptname);
+ 				}
+@@ -7206,7 +7262,7 @@ static char *send_oscam_scanusb(struct templatevars * vars)
+ 
+ 		tpl_addVar(vars, TPLADD, header, txt);
+ 		fp = popen(elems[i + 4], "r"); //command
+-		if(!fp || !fgets(line, sizeof(line) - 1, fp))
++		if(!fgets(line, sizeof(line) - 1, fp) || !fp)
+ 		{
+ 			tpl_addVar(vars, TPLADD, entry, error);
+ 			tpl_addVar(vars, TPLADD, bit, tpl_getTpl(vars, scan));
+@@ -7227,8 +7283,8 @@ static char *send_oscam_scanusb(struct templatevars * vars)
+ 				tpl_addVar(vars, TPLAPPEND, bit, tpl_getTpl(vars, scan));
+ 			}
+ 			while(fgets(line, sizeof(line) - 1, fp) != NULL);
+-			pclose(fp);
+ 		}
++		pclose(fp);
+ 	}
+ #else
+ 	tpl_addMsg(vars, "Function not supported in CYGWIN environment");
+@@ -7244,10 +7300,7 @@ static void webif_process_logfile(struct templatevars * vars, struct uriparams *
+ 		if(cs_strlen(targetfile) > 0)
+ 		{
+ 			FILE *file = fopen(targetfile, "w");
+-			if (file != NULL)
+-			{
+-				fclose(file);
+-			}
++			fclose(file);
+ 		}
+ 	}
+ #ifdef WITH_DEBUG
+@@ -7307,10 +7360,7 @@ static void webif_process_userfile(struct templatevars * vars, struct uriparams
+ 		if(cs_strlen(targetfile) > 0)
+ 		{
+ 			FILE *file = fopen(targetfile, "w");
+-			if (file)
+-			{
+-				fclose(file);
+-			}
++			fclose(file);
+ 		}
+ 	}
+ 	if(!cfg.disableuserfile)
+@@ -7397,6 +7447,9 @@ static char *send_oscam_files(struct templatevars * vars, struct uriparams * par
  		{ "stats.info",      MNU_GBX_FSTAINF,   FTYPE_GBOX },     // id 27
  		{ "expired.info",    MNU_GBX_FEXPINF,   FTYPE_GBOX },     // id 28
  		{ "info.log",        MNU_GBX_INFOLOG,   FTYPE_GBOX },     // id 29
@@ -13039,7 +13194,7 @@ index 3494942a..2a2965ce 100644
  #endif
  		{ NULL, 0, 0 },
  	};
-@@ -7863,7 +7922,11 @@ static char *send_oscam_EMM_running(struct templatevars * vars, struct uriparams
+@@ -7869,7 +7922,11 @@ static char *send_oscam_EMM_running(struct templatevars * vars, struct uriparams
  		else if(!proxy && rdr->csystem_active)     // local active reader
  		{
  			csystem = rdr->csystem;
@@ -13052,7 +13207,27 @@ index 3494942a..2a2965ce 100644
  		}
  
  		if(csystem)
-@@ -8080,10 +8143,7 @@ static char *send_oscam_cacheex(struct templatevars * vars, struct uriparams * p
+@@ -8007,16 +8064,13 @@ static char *send_oscam_EMM(struct templatevars * vars, struct uriparams * param
+ 					do {
+ 						snprintf(orgfile, sizeof(orgfile), "%s.%d", targetfile, f);
+ 						f++;
+-					} while(access(orgfile, F_OK) != -1);
++					} while(access(orgfile, 0|F_OK) != -1);
+ 
+ 					if(rename(targetfile, orgfile) == 0)
+ 					{
+ 						FILE *fs = fopen(targetfile, "w");
+-						if (fs)
+-						{
+-							fprintf(fs, "%s", tpl_getVar(vars, "EMM_TMP"));
+-							fclose(fs);
+-						}
++						fprintf(fs, "%s", tpl_getVar(vars, "EMM_TMP"));
++						fclose(fs);
+ 						tpl_printf(vars, TPLAPPEND, emm_txt, "<br><b>New reduced File created!</b> Size of Original File is higher as %d kB, saved to %s", emm_max_size[i], orgfile);
+ 					}
+ 				}
+@@ -8089,10 +8143,7 @@ static char *send_oscam_cacheex(struct templatevars * vars, struct uriparams * p
  	char *pushing = "<IMG SRC=\"image?i=ICARRR\" ALT=\"Pushing\">";
  	char *rowvariable = "";
  
@@ -13064,7 +13239,7 @@ index 3494942a..2a2965ce 100644
  	struct s_client *cl;
  	time_t now = time((time_t *)0);
  	int delimiter=0;
-@@ -8101,10 +8161,9 @@ static char *send_oscam_cacheex(struct templatevars * vars, struct uriparams * p
+@@ -8110,10 +8161,9 @@ static char *send_oscam_cacheex(struct templatevars * vars, struct uriparams * p
  	const char *cacheex_name_link_tpl = NULL;
  	tpl_addVar(vars, TPLADD, "CLIENTDESCRIPTION", "");
  
@@ -13076,7 +13251,7 @@ index 3494942a..2a2965ce 100644
  		char classname[9];
  		snprintf(classname, 8, "class%02d", i) < 0 ? abort() : (void)0;
  		classname[8] = '\0';
-@@ -8467,12 +8526,13 @@ static char *send_oscam_api(struct templatevars * vars, FILE * f, struct uripara
+@@ -8476,12 +8526,13 @@ static char *send_oscam_api(struct templatevars * vars, FILE * f, struct uripara
  	}
  	else if(strcmp(getParam(params, "part"), "ecmhistory") == 0)
  	{
@@ -13091,7 +13266,7 @@ index 3494942a..2a2965ce 100644
  		{
  			if(cl->wihidden != 1)
  			{
-@@ -9050,7 +9110,11 @@ static int32_t readRequest(FILE * f, IN_ADDR_T in, char **result, int8_t forcePl
+@@ -9059,7 +9110,11 @@ static int32_t readRequest(FILE * f, IN_ADDR_T in, char **result, int8_t forcePl
  		memcpy(*result + bufsize, buf2, n);
  		bufsize += n;
  
@@ -13338,7 +13513,7 @@ index 4096513d..cb8ec85f 100644
  		cs_log_dbg(D_TRACE, "warning: ecm with null odd/even byte from %s", (check_client(er->client) ? er->client->account->usr : "-"));
  		er->rc = E_INVALID;
 diff --git a/oscam-emm.c b/oscam-emm.c
-index f91c0daa..1d3e1e3a 100644
+index 296a5f09..1d3e1e3a 100644
 --- a/oscam-emm.c
 +++ b/oscam-emm.c
 @@ -40,6 +40,7 @@ static int8_t cs_emmlen_is_blocked(struct s_reader *rdr, int16_t len)
@@ -13349,7 +13524,17 @@ index f91c0daa..1d3e1e3a 100644
  
  	//copied and enhanced from module-dvbapi.c
  	//dvbapi_start_emm_filter()
-@@ -237,6 +238,24 @@ int32_t emm_reader_match(struct s_reader *reader, uint16_t caid, uint32_t provid
+@@ -51,9 +52,6 @@ static int8_t do_simple_emm_filter(struct s_reader *rdr, const struct s_cardsyst
+ 	// Call cardsystems emm filter
+ 	csystem->get_emm_filter(rdr, &dmx_filter, &filter_count);
+ 
+-	if(!dmx_filter)
+-		{ return 0; }
+-
+ 	// Only check matching emmtypes:
+ 	uint8_t org_emmtype;
+ 	if(ep->type == UNKNOWN)
+@@ -240,6 +238,24 @@ int32_t emm_reader_match(struct s_reader *reader, uint16_t caid, uint32_t provid
  		rdr_log_dbg(reader, D_EMM, "reader auprovid = %06X fixup to %06X (ignoring last digit)", reader->auprovid, prid);
  	}
  
@@ -13720,8 +13905,21 @@ index 50fa5c27..d04f64b4 100644
  void __cs_pthread_cond_init(const char *n, pthread_cond_t *cond);
  void cs_pthread_cond_init(const char *n, pthread_mutex_t *mutex, pthread_cond_t *cond);
  
+diff --git a/oscam-work.c b/oscam-work.c
+index d0592c38..bee981dc 100644
+--- a/oscam-work.c
++++ b/oscam-work.c
+@@ -304,8 +304,6 @@ void *work_thread(void *ptr)
+ 
+ 				case ACTION_READER_SENDCMD:
+ #ifdef WITH_CARDREADER
+-					if (!reader)
+-						{ break; }
+ 					dblvl = cs_dblevel;
+ 					cs_dblevel = dblvl | D_READER;
+ 					rc = cardreader_do_rawcmd(reader, data->ptr);
 diff --git a/oscam.c b/oscam.c
-index 6560b9ef..3262577e 100644
+index a647a53b..3262577e 100644
 --- a/oscam.c
 +++ b/oscam.c
 @@ -41,6 +41,10 @@
@@ -13766,7 +13964,44 @@ index 6560b9ef..3262577e 100644
  		write_cardreaderconf(CARDREADER_INTERNAL_SCI, "internal_sci");
  		write_cardreaderconf(CARDREADER_SC8IN1, "sc8in1");
  		write_cardreaderconf(CARDREADER_MP35, "mp35");
-@@ -1640,8 +1650,6 @@ const struct s_cardreader *cardreaders[] =
+@@ -664,20 +674,14 @@ static void cs_dumpstack(int32_t sig)
+ 
+ 	fprintf(stderr, "crashed with signal %d on %swriting oscam.crash\n", sig, buf);
+ 
+-	if (fp)
+-	{
+-		fprintf(fp, "%sOSCam cardserver v%s@%s (%s)\n", buf, CS_VERSION, CS_GIT_COMMIT, CS_TARGET);
+-		fprintf(fp, "FATAL: Signal %d: %s Fault. Logged StackTrace:\n\n", sig, (sig == SIGSEGV) ? "Segmentation" : ((sig == SIGBUS) ? "Bus" : "Unknown"));
+-		fclose(fp);
+-	}
++	fprintf(fp, "%sOSCam cardserver v%s@%s (%s)\n", buf, CS_VERSION, CS_GIT_COMMIT, CS_TARGET);
++	fprintf(fp, "FATAL: Signal %d: %s Fault. Logged StackTrace:\n\n", sig, (sig == SIGSEGV) ? "Segmentation" : ((sig == SIGBUS) ? "Bus" : "Unknown"));
++	fclose(fp);
+ 
+ 	FILE *cmd = fopen("/tmp/gdbcmd", "w");
+-	if (cmd)
+-	{
+-		fputs("bt\n", cmd);
+-		fputs("thread apply all bt\n", cmd);
+-		fclose(cmd);
+-	}
++	fputs("bt\n", cmd);
++	fputs("thread apply all bt\n", cmd);
++	fclose(cmd);
+ 
+ 	snprintf(buf, sizeof(buf) - 1, "gdb %s %d -batch -x /tmp/gdbcmd >> oscam.crash", prog_name, getpid());
+ 	if(system(buf) == -1)
+@@ -1570,8 +1574,8 @@ static void detect_valgrind(void)
+ 				break;
+ 			}
+ 		}
+-		fclose(f);
+ 	}
++	fclose(f);
+ #endif
+ }
+ 
+@@ -1646,8 +1650,6 @@ const struct s_cardreader *cardreaders[] =
  	&cardreader_internal_cool,
  #elif defined(CARDREADER_INTERNAL_COOLAPI2)
  	&cardreader_internal_cool,
@@ -13775,7 +14010,7 @@ index 6560b9ef..3262577e 100644
  #elif defined(CARDREADER_INTERNAL_SCI)
  	&cardreader_internal_sci,
  #endif
-@@ -1672,6 +1680,9 @@ const struct s_cardreader *cardreaders[] =
+@@ -1678,6 +1680,9 @@ const struct s_cardreader *cardreaders[] =
  #ifdef CARDREADER_STINGER
  	&cardreader_stinger,
  #endif
@@ -13785,7 +14020,7 @@ index 6560b9ef..3262577e 100644
  
  	NULL
  };
-@@ -1724,6 +1735,8 @@ int32_t main(int32_t argc, char *argv[])
+@@ -1730,6 +1735,8 @@ int32_t main(int32_t argc, char *argv[])
  	run_tests();
  	int32_t i, j;
  	prog_name = argv[0];
@@ -13794,7 +14029,7 @@ index 6560b9ef..3262577e 100644
  
  	if(pthread_key_create(&getclient, NULL))
  	{
-@@ -1851,6 +1864,9 @@ int32_t main(int32_t argc, char *argv[])
+@@ -1857,6 +1864,9 @@ int32_t main(int32_t argc, char *argv[])
  
  	init_sidtab();
  	init_readerdb();
@@ -13836,7 +14071,7 @@ index efdd19b3..2c8fc7dd 100644
  	{
  		NULLFREE(reader->csystem_data);
 diff --git a/reader-conax.c b/reader-conax.c
-index 535012e6..3b08ade2 100644
+index f0f28171..3b08ade2 100644
 --- a/reader-conax.c
 +++ b/reader-conax.c
 @@ -6,47 +6,86 @@
@@ -13964,6 +14199,41 @@ index 535012e6..3b08ade2 100644
  }
  
  static int32_t RSA_CNX(struct s_reader *reader, uint8_t *msg, uint8_t *mod, uint8_t *exp, uint32_t cta_lr, uint32_t modbytes, uint32_t expbytes)
+@@ -71,7 +110,6 @@ static int32_t RSA_CNX(struct s_reader *reader, uint8_t *msg, uint8_t *mod, uint
+ 		if(ctx == NULL)
+ 		{
+ 			rdr_log_dbg(reader, D_READER, "RSA Error in RSA_CNX");
+-			return -1;
+ 		}
+ 
+ 		BN_CTX_start(ctx);
+diff --git a/reader-dre-cas.c b/reader-dre-cas.c
+index 6ac03418..642a27e8 100644
+--- a/reader-dre-cas.c
++++ b/reader-dre-cas.c
+@@ -539,10 +539,6 @@ static int32_t drecas_card_init(struct s_reader *reader, ATR *newatr)
+ 		int cmd_len;
+ 		int n;
+ 		char *tempbuf = malloc(2048);
+-		if (!tempbuf)
+-		{
+-			return ERROR;
+-		}
+ 		trim2(reader->userscript);
+ 		FILE *pFile = fopen(reader->userscript, "rt");
+ 
+@@ -565,11 +561,6 @@ static int32_t drecas_card_init(struct s_reader *reader, ATR *newatr)
+ 
+ 				cmd_len = cs_strlen(tempbuf) / 2 - 3;
+ 				usercmd = malloc(cmd_len);
+-				if (!usercmd)
+-				{
+-					free(tempbuf);
+-					return ERROR;
+-				}
+ 
+ 				for(i = 0, n = 4; i < cmd_len; i++, n += 2)
+ 				{
 diff --git a/reader-dre-st20.c b/reader-dre-st20.c
 index e0170621..d605cde8 100644
 --- a/reader-dre-st20.c
@@ -14016,6 +14286,43 @@ index e0170621..d605cde8 100644
  		st20_set_call_frame(&ctx, 0, RAMS, RAMS, RAMS);
  
  		for(i = 0; i < 8; i++)
+diff --git a/reader-dre.c b/reader-dre.c
+index 2d1b074d..0cafe07e 100644
+--- a/reader-dre.c
++++ b/reader-dre.c
+@@ -632,12 +632,6 @@ static int32_t dre_card_init(struct s_reader *reader, ATR *newatr)
+ 
+ 				cmd_len = cs_strlen(tempbuf) / 2 - 3 + ignoreProvid - (crypted * 2);
+ 				usercmd = malloc(cmd_len);
+-				if (!usercmd)
+-				{
+-					free(tempbuf);
+-					fclose(pFile);
+-					return ERROR;
+-				}
+ 
+ 				for(i = 0, n = 4 + (crypted * 4); i < cmd_len; i++, n += 2)
+ 				{
+@@ -657,7 +651,6 @@ static int32_t dre_card_init(struct s_reader *reader, ATR *newatr)
+ 				rdr_log(reader, "Script %s", ({dre_script_nb(usercmd, cmd_len, ignoreProvid, crypted, cryptkey)}) ? "done" : "error");
+ 			}
+ 			while(!feof(pFile));
+-			fclose(pFile);
+ 		}
+ 		else
+ 		{
+diff --git a/reader-nagra.c b/reader-nagra.c
+index 609444c0..3e67b77d 100644
+--- a/reader-nagra.c
++++ b/reader-nagra.c
+@@ -877,6 +877,7 @@ static int32_t nagra2_card_init(struct s_reader *reader, ATR *newatr)
+ 				return ERROR;
+ 			}
+ 		}
++		NULLFREE(reader->csystem_data);
+ 		return ERROR; // quitting csystem still not having needed commands to run on nagra layer
+ 	}
+ 	else
 diff --git a/reader-nagracak7.c b/reader-nagracak7.c
 index 3cd4541c..5b64ec3d 100644
 --- a/reader-nagracak7.c
