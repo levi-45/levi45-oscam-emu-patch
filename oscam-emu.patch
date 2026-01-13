@@ -209,7 +209,7 @@ index 00000000..5bfa93bd
 +    needs:
 +      - sync
 diff --git a/.gitlab/oscam-helper.yml b/.gitlab/oscam-helper.yml
-index e9e248d6..9e68f6ce 100644
+index f3fef2a2..9e68f6ce 100644
 --- a/.gitlab/oscam-helper.yml
 +++ b/.gitlab/oscam-helper.yml
 @@ -115,14 +115,9 @@
@@ -223,14 +223,14 @@ index e9e248d6..9e68f6ce 100644
 -        curl --silent -L "https://gitlab.com/gitlab-org/incubation-engineering/mobile-devops/download-secure-files/-/raw/main/installer" | bash;
 -      else
 -        echo "download-secure-files already installed, skipping...";
--        download-secure-files;
+-        $HOME/bin/download-secure-files;
 -      fi;
 +      curl --silent -L "https://gitlab.com/gitlab-org/incubation-engineering/mobile-devops/download-secure-files/-/raw/main/installer" | bash;
  
    #checkout git repository parts (needs variables GIT_STRATEGY: none and e.g. GIT SPARSE_FILTER: .gitlab to be set in the calling job)
    sparse-checkout:
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index ebcf9009..b39bc25a 100644
+index 5a9c976d..b39bc25a 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
 @@ -53,8 +53,6 @@ if (CMAKE_CROSSCOMPILING)
@@ -284,7 +284,31 @@ index ebcf9009..b39bc25a 100644
  # Generate webif/pages.c
  execute_process (COMMAND make --no-print-directory --quiet -C ${CMAKE_CURRENT_SOURCE_DIR}/webif clean)
  execute_process (COMMAND make --no-print-directory --quiet -C ${CMAKE_CURRENT_SOURCE_DIR}/webif)
-@@ -884,6 +895,24 @@ endif( HAVE_LIBRT OR HAVE_LIBRT_STATIC)
+@@ -691,6 +702,12 @@ if (HAVE_LIBCRYPTO)
+ 	target_link_libraries (${exe_name} "${OPENSSL_CRYPTO_LIBRARIES}")
+ endif (HAVE_LIBCRYPTO)
+ 
++# some systems need libm for the nagra cak7 functions to work
++check_include_file("math.h" HAVE_LIBM)
++if(HAVE_LIBM)
++	target_link_libraries (${exe_name} m)
++endif(HAVE_LIBM)
++
+ if (HAVE_PCSC)
+ if (NOT OSCamOperatingSystem MATCHES "Mac OS X")
+ if (NOT OSCamOperatingSystem MATCHES "Windows/Cygwin")
+@@ -711,6 +728,10 @@ add_dependencies (${exe_name} ${csoscam} ${csreaders} ${csmodules})
+ 
+ #----------------------- specific options ------------------------------
+ 
++if (NOT OSCamOperatingSystem MATCHES "(Mac OS X|Windows/Cygwin|FreeBSD|OpenBSD)")
++	target_link_libraries (${exe_name} rt)
++endif (NOT OSCamOperatingSystem MATCHES "(Mac OS X|Windows/Cygwin|FreeBSD|OpenBSD)")
++
+ if (OSCamOperatingSystem MATCHES "Linux")
+ 	set (dl_link "dl")
+ elseif (OSCamOperatingSystem MATCHES "Mac OS X")
+@@ -874,6 +895,24 @@ endif( HAVE_LIBRT OR HAVE_LIBRT_STATIC)
  
  #--------------------------------------------------------------------------------
  
@@ -309,7 +333,7 @@ index ebcf9009..b39bc25a 100644
  #----------------------- installation -----------------------------
  
  file (GLOB config_files "${CMAKE_CURRENT_SOURCE_DIR}/Distribution/oscam.*")
-@@ -996,4 +1025,11 @@ if (HAVE_LIBDVBCSA)
+@@ -986,4 +1025,11 @@ if (HAVE_LIBDVBCSA)
  	endif(STATICLIBDVBCSA AND NOT LIBDVBCSADIR)
  endif (HAVE_LIBDVBCSA)
  
@@ -370,7 +394,7 @@ index 3d333a93..08b173ed 100644
  	  1 = send keepalive messages to keep connection to remote CCCam server up, default:0
  
 diff --git a/Makefile b/Makefile
-index 69fc7244..a95e2c04 100644
+index ea47c289..a95e2c04 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -32,6 +32,9 @@ ifeq "$(shell ./config.sh --enabled WITH_SSL)" "Y"
@@ -383,7 +407,43 @@ index 69fc7244..a95e2c04 100644
  ifdef USE_SSL
  	override USE_LIBCRYPTO=1
  endif
-@@ -262,7 +265,6 @@ $(eval $(call prepare_use_flags,COOLAPI,coolapi))
+@@ -41,6 +44,12 @@ CONF_DIR = /usr/local/etc
+ LIB_PTHREAD = -lpthread
+ LIB_DL = -ldl
+ 
++LIB_RT :=
++ifeq ($(uname_S),Linux)
++	ifeq "$(shell ./config.sh --enabled CLOCKFIX)" "Y"
++		LIB_RT := -lrt
++	endif
++endif
+ ifeq ($(uname_S),FreeBSD)
+ 	LIB_DL :=
+ endif
+@@ -54,7 +63,7 @@ ifeq "$(shell ./config.sh --enabled MODULE_STREAMRELAY)" "Y"
+ 	endif
+ endif
+ 
+-override STD_LIBS := $(LIB_PTHREAD) $(LIB_DL)
++override STD_LIBS := -lm $(LIB_PTHREAD) $(LIB_DL) $(LIB_RT)
+ override STD_DEFS := -D'CS_VERSION="$(VER)"'
+ override STD_DEFS += -D'CS_GIT_COMMIT="$(GIT_SHA)"'
+ override STD_DEFS += -D'CS_BUILD_DATE="$(BUILD_DATE)"'
+@@ -186,8 +195,11 @@ DEFAULT_AZBOX_LIB = -Lextapi/openxcas -lOpenXCASAPI
+ DEFAULT_LIBCRYPTO_LIB = -lcrypto
+ DEFAULT_SSL_LIB = -lssl
+ DEFAULT_LIBDVBCSA_LIB = -ldvbcsa
+-DEFAULT_LIBUSB_LIB = -lusb-1.0
+-
++ifeq ($(uname_S),Linux)
++	DEFAULT_LIBUSB_LIB = -lusb-1.0 -lrt
++else
++	DEFAULT_LIBUSB_LIB = -lusb-1.0
++endif
+ # Since FreeBSD 8 (released in 2010) they are using their own
+ # libusb that is API compatible to libusb but with different soname
+ ifeq ($(uname_S),FreeBSD)
+@@ -253,7 +265,6 @@ $(eval $(call prepare_use_flags,COOLAPI,coolapi))
  $(eval $(call prepare_use_flags,COOLAPI2,coolapi2))
  $(eval $(call prepare_use_flags,SU980,su980))
  $(eval $(call prepare_use_flags,AZBOX,azbox))
@@ -391,7 +451,7 @@ index 69fc7244..a95e2c04 100644
  $(eval $(call prepare_use_flags,MCA,mca))
  $(eval $(call prepare_use_flags,SSL,ssl))
  $(eval $(call prepare_use_flags,LIBCRYPTO,))
-@@ -366,7 +368,6 @@ SRC-$(CONFIG_CARDREADER_SMART) += csctapi/ifd_smartreader.c
+@@ -357,7 +368,6 @@ SRC-$(CONFIG_CARDREADER_SMART) += csctapi/ifd_smartreader.c
  SRC-$(CONFIG_CARDREADER_STINGER) += csctapi/ifd_stinger.c
  SRC-$(CONFIG_CARDREADER_STAPI) += csctapi/ifd_stapi.c
  SRC-$(CONFIG_CARDREADER_STAPI5) += csctapi/ifd_stapi.c
@@ -399,7 +459,7 @@ index 69fc7244..a95e2c04 100644
  
  SRC-$(CONFIG_LIB_MINILZO) += minilzo/minilzo.c
  
-@@ -379,6 +380,32 @@ SRC-$(CONFIG_CS_CACHEEX) += module-cccam-cacheex.c
+@@ -370,6 +380,32 @@ SRC-$(CONFIG_CS_CACHEEX) += module-cccam-cacheex.c
  SRC-$(CONFIG_MODULE_CCCAM) += module-cccam.c
  SRC-$(CONFIG_MODULE_CCCSHARE) += module-cccshare.c
  SRC-$(CONFIG_MODULE_CONSTCW) += module-constcw.c
@@ -432,7 +492,7 @@ index 69fc7244..a95e2c04 100644
  SRC-$(CONFIG_CS_CACHEEX) += module-csp.c
  SRC-$(CONFIG_CW_CYCLE_CHECK) += module-cw-cycle-check.c
  SRC-$(CONFIG_WITH_AZBOX) += module-dvbapi-azbox.c
-@@ -764,11 +791,6 @@ OSCam build system documentation\n\
+@@ -755,11 +791,6 @@ OSCam build system documentation\n\
                       Using USE_AZBOX=1 adds to '-azbox' to PLUS_TARGET.\n\
                       extapi/openxcas/libOpenXCASAPI.a library that is shipped\n\
                       with OSCam is compiled for MIPSEL.\n\
@@ -444,7 +504,7 @@ index 69fc7244..a95e2c04 100644
  \n\
     USE_MCA=1      - Request support for Matrix Cam Air (MCA).\n\
                      The variables that control the build are:\n\
-@@ -908,8 +930,6 @@ OSCam build system documentation\n\
+@@ -899,8 +930,6 @@ OSCam build system documentation\n\
       make CROSS=arm-pnx8400-linux-uclibcgnueabi- USE_COOLAPI2=1\n\n\
     Build OSCam for MIPSEL with AZBOX support:\n\
       make CROSS=mipsel-linux-uclibc- USE_AZBOX=1\n\n\
@@ -900,10 +960,96 @@ index 38262231..00000000
 -};
 -
 -#endif
+diff --git a/csctapi/ifd_azbox.c b/csctapi/ifd_azbox.c
+index 70872ef7..5703dd71 100644
+--- a/csctapi/ifd_azbox.c
++++ b/csctapi/ifd_azbox.c
+@@ -85,6 +85,9 @@ static int32_t Azbox_Reset(struct s_reader *reader, ATR *atr)
+ 
+         rdr_log_dbg(reader, D_IFD, "Waiting for card ATR Response...");
+ 
++        int32_t ret = 0;
++        while(ret);
++
+         int32_t FI = (buf[n] >> 4);
+ 
+ 	int32_t Fi = atr_f_table[FI];
+@@ -106,7 +109,9 @@ static int32_t Azbox_Reset(struct s_reader *reader, ATR *atr)
+         rdr_log_dbg(reader, D_IFD, "ATR Fsmax is %.2f MHz, Work ETU is %.2f us, clocking card to %.2f MHz",
+ 			                fmax / 1000000, (double)((double)(1 / (double)D) * ((double)Fi / (double)((double)frequency / 1000000))), (float) frequency / 1000000);
+ 
+-	if(ATR_InitFromArray(atr, buf, n) == ERROR)
++        ret = ATR_InitFromArray(atr, buf, n);
++
++	if(ret == ERROR)
+ 	{
+ 		rdr_log(reader, "WARNING: ATR is invalid!");
+ 		return ERROR;
+diff --git a/csctapi/ifd_sci.c b/csctapi/ifd_sci.c
+index 303cd685..d414e347 100644
+--- a/csctapi/ifd_sci.c
++++ b/csctapi/ifd_sci.c
+@@ -345,19 +345,21 @@ static int32_t Sci_Reset(struct s_reader *reader, ATR *atr)
+ 			{
+ 				Sci_Deactivate(reader);
+ 				Sci_Activate(reader);
+-				tries++; // increase fs
+ 				if (reader->cardmhz > 2000 && reader->cardmhz != 8300)
+ 				{
++					tries++; // increase fs
+ 					params.fs = (pll_start_fs - tries); // if 1 Mhz init failed retry with min 300 Mhz up to max 9.0 Mhz
+ 					rdr_log(reader, "Read ATR fail, attempt %d/%d  fs = %d", tries, max_tries, params.fs);
+ 				}
+-				else if (reader->cardmhz == 8300)
++				else if (reader->cardmhz > 2000 && reader->cardmhz == 8300)
+ 				{
++					tries++; // increase fs
+ 					params.fs = (11 - tries); // if 1 Mhz init failed retry with 3.19 Mhz up to 5.188 Mhz
+ 					rdr_log(reader, "Read ATR fail, attempt %d/5  fs = %d", tries, params.fs);
+ 				}
+ 				else
+ 				{
++					tries++; // increase fs
+ 					params.fs = (2 + tries); // if 1 Mhz init failed retry with 3.0 Mhz up to 7.0 Mhz
+ 					rdr_log(reader, "Read ATR fail, attempt %d/5  fs = %d", tries, params.fs);
+ 				}
+@@ -487,6 +489,7 @@ static int32_t Sci_Init(struct s_reader *reader)
+ 	int flags = O_RDWR | O_NOCTTY;
+ #if defined(__SH4__) || defined(STB04SCI)
+ 	flags |= O_NONBLOCK;
++	reader->sh4_stb = 1;
+ #endif
+ 	reader->handle = open(reader->device, flags);
+ 	if(reader->handle < 0)
+diff --git a/csctapi/ifd_stinger.c b/csctapi/ifd_stinger.c
+index a4883f5d..47928a3b 100644
+--- a/csctapi/ifd_stinger.c
++++ b/csctapi/ifd_stinger.c
+@@ -339,7 +339,10 @@ static int32_t stinger_mouse_init(struct s_reader *reader)
+ 	}
+ 
+ 	clock_mhz = reader->mhz;
+-	reader->mhz = reader->cardmhz;
++
++	if(reader->mhz != reader->cardmhz)
++		{ reader->mhz = reader->cardmhz; }
++
+ 
+ 	reader->handle = open(reader->device,  O_RDWR | O_NOCTTY | O_NONBLOCK);
+ 	if(reader->handle < 0)
 diff --git a/globals.h b/globals.h
-index e3322677..9835ffec 100644
+index 78c3a90b..9835ffec 100644
 --- a/globals.h
 +++ b/globals.h
+@@ -234,7 +234,7 @@
+ #endif
+ 
+ // checking if (X) free(X) unneccessary since freeing a null pointer doesnt do anything
+-#define NULLFREE(X) {void *tmpX=X; X=NULL; free(tmpX); }
++#define NULLFREE(X) {if (X) {void *tmpX=X; X=NULL; free(tmpX); }}
+ 
+ #ifdef __CYGWIN__
+ #define cs_recv(a,b,c,d) cygwin_recv(a,b,c,d)
 @@ -368,11 +368,11 @@
  /* ===========================
   *			constants
@@ -914,7 +1060,7 @@ index e3322677..9835ffec 100644
 -#define BOARD_URL				"https://board.streamboard.tv"
 +#define BOARD_URL				"https://github.com/oscam-mirror/oscam-emu/discussions"
  #ifndef CS_VERSION
- #define CS_VERSION				"2.26.01-11922"
+ #define CS_VERSION				"2.26.01-11925"
  #endif
  #ifndef CS_GIT_COMMIT
  #define CS_GIT_COMMIT			"a2b4c6d8"
@@ -977,7 +1123,13 @@ index e3322677..9835ffec 100644
  #endif
  } CECSP;
  
-@@ -1756,6 +1767,7 @@ struct s_reader										// contains device info, reader info and card info
+@@ -1750,11 +1761,13 @@ struct s_reader										// contains device info, reader info and card info
+ 	int8_t			ncd_disable_server_filt;
+ 	int8_t			ncd_proto;
+ 	int8_t			currenthops;					// number of hops (cccam & gbox)
++	int8_t			sh4_stb;						// to set sh4 type box used to identify sci type.
+ #ifdef MODULE_CCCAM
+ 	char			cc_version[7];					// cccam version
  	char			cc_build[7];					// cccam build number
  	int8_t			cc_maxhops;						// cccam max distance
  	int8_t			cc_mindown;						// cccam min downhops
@@ -985,7 +1137,7 @@ index e3322677..9835ffec 100644
  	uint32_t		cc_id;
  	int8_t			cc_keepalive;
  	int8_t			cc_hop;							// For non-cccam reader: hop for virtual cards
-@@ -1936,6 +1948,11 @@ struct s_reader										// contains device info, reader info and card info
+@@ -1935,6 +1948,11 @@ struct s_reader										// contains device info, reader info and card info
  #endif
  #ifdef MODULE_GHTTP
  	uint8_t			ghttp_use_ssl;
@@ -997,7 +1149,7 @@ index e3322677..9835ffec 100644
  #endif
  	uint8_t			cnxlastecm;						// == 0 - last ecm has not been paired ecm, > 0 last ecm has been paired ecm
  	LLIST			*emmstat;						// emm stats
-@@ -2470,6 +2487,10 @@ struct s_config
+@@ -2469,6 +2487,10 @@ struct s_config
  #else
  #define DEFAULT_STREAM_SOURCE_PORT 8001 //Enigma2
  #endif
@@ -1008,7 +1160,7 @@ index e3322677..9835ffec 100644
  #endif
  
  	int32_t			max_cache_time;					// seconds ecms are stored in ecmcwcache
-@@ -2655,12 +2676,18 @@ bool boxtype_is(const char *boxtype);
+@@ -2654,12 +2676,18 @@ bool boxtype_is(const char *boxtype);
  bool boxname_is(const char *boxname);
  const char *boxtype_get(void);
  const char *boxname_get(void);
@@ -1027,7 +1179,7 @@ index e3322677..9835ffec 100644
  static inline bool caid_is_betacrypt(uint16_t caid) { return caid >> 8 == 0x17; }
  static inline bool caid_is_nagra(uint16_t caid) { return caid >> 8 == 0x18; }
  static inline bool caid_is_bulcrypt(uint16_t caid) { return caid == 0x5581 || caid == 0x4AEE; }
-@@ -2678,4 +2705,8 @@ static inline uint8_t get_ecm_mode(const ECM_REQUEST *er) {
+@@ -2677,4 +2705,8 @@ static inline uint8_t get_ecm_mode(const ECM_REQUEST *er) {
  #endif
  const char *get_cardsystem_desc_by_caid(uint16_t caid);
  
@@ -1063,7 +1215,7 @@ index 9287aed3..04e27699 100644
  		cs_log_dbg(D_CACHEEX, "push received ecm with null odd/even byte from %s", csp ? "csp" : username(cl));
  		cl->cwcacheexerr++;
 diff --git a/module-camd35-cacheex.c b/module-camd35-cacheex.c
-index 7c155918..f7258a02 100644
+index b03989b0..f7258a02 100644
 --- a/module-camd35-cacheex.c
 +++ b/module-camd35-cacheex.c
 @@ -267,51 +267,16 @@ void camd35_cacheex_feature_trigger_in(struct s_client *cl, uint8_t *buf)
@@ -1136,8 +1288,17 @@ index 7c155918..f7258a02 100644
  
  			// bitfield
  			i2b_buf(2, feature, payload + i);
+@@ -1128,7 +1092,7 @@ static int32_t camd35_cacheex_push_chk(struct s_client *cl, ECM_REQUEST *er)
+ 		}
+ 	}
+ 
+-	//if(chk_is_null_nodeid(remote_node)){
++	//if(chk_is_null_nodeid(remote_node,8)){
+ 	if(!cl->ncd_skey[8])
+ 	{
+ 		cs_log_dbg(D_CACHEEX, "cacheex: NO peer_node_id got yet, skip!");
 diff --git a/module-cccam-cacheex.c b/module-cccam-cacheex.c
-index a5a80924..5acc7b9a 100644
+index 039f4642..5acc7b9a 100644
 --- a/module-cccam-cacheex.c
 +++ b/module-cccam-cacheex.c
 @@ -269,51 +269,16 @@ void cc_cacheex_feature_trigger_in(struct s_client *cl, uint8_t *buf)
@@ -1205,8 +1366,17 @@ index a5a80924..5acc7b9a 100644
  
  			// bitfield
  			i2b_buf(2, feature, payload + i);
+@@ -1081,7 +1045,7 @@ void cc_cacheex_filter_in(struct s_client *cl, uint8_t *buf)
+ static int32_t cc_cacheex_push_chk(struct s_client *cl, struct ecm_request_t *er)
+ {
+ 	struct cc_data *cc = cl->cc;
+-	if(chk_is_null_nodeid(cc->peer_node_id))
++	if(chk_is_null_nodeid(cc->peer_node_id,8))
+ 	{
+ 		cs_log_dbg(D_CACHEEX, "cacheex: NO peer_node_id got yet, skip!");
+ 		return 0;
 diff --git a/module-cccam.c b/module-cccam.c
-index b92afa1e..95cdb4b2 100644
+index b3e55ed2..95cdb4b2 100644
 --- a/module-cccam.c
 +++ b/module-cccam.c
 @@ -1009,7 +1009,7 @@ int32_t cc_send_cli_data(struct s_client *cl)
@@ -1228,7 +1398,7 @@ index b92afa1e..95cdb4b2 100644
  		{
  			int32_t goodSidCount = ll_count(ncard->goodsids);
  			int32_t badSidCount = ll_count(ncard->badsids);
-@@ -1583,7 +1584,7 @@ struct cc_card *get_matching_card(struct s_client *cl, ECM_REQUEST *cur_er, int8
+@@ -1583,13 +1584,20 @@ struct cc_card *get_matching_card(struct s_client *cl, ECM_REQUEST *cur_er, int8
  				}
  			}
  
@@ -1236,6 +1406,88 @@ index b92afa1e..95cdb4b2 100644
 +			if(!(rdr->cc_want_emu) && caid_is_nagra(ncard->caid) && (!xcard || ncard->hop < xcard->hop))
  			{
  				xcard = ncard; // remember card (D+ / 1810 fix) if request has no provider, but card has
+ 			}
+ 
+ 			rating = ncard->rating - ncard->hop * HOP_RATING;
+-			rating = MIN(MAX(rating, MIN_RATING), MAX_RATING);
++			if(rating < MIN_RATING)
++			{
++				rating = MIN_RATING;
++			}
++			else if(rating > MAX_RATING)
++			{
++				rating = MAX_RATING;
++			}
+ 
+ 			if(!ll_count(ncard->providers)) // card has no providers:
+ 			{
+@@ -2263,6 +2271,24 @@ int32_t is_null_dcw(uint8_t *dcw)
+ 	return 1;
+ }
+ 
++/*int32_t is_dcw_corrupted(uint8_t *dcw)
++{
++	int32_t i;
++	int32_t c, cs;
++
++	for(i = 0; i < 16; i += 4)
++	{
++		c = (dcw[i] + dcw[i + 1] + dcw[i + 2]) & 0xFF;
++		cs = dcw[i + 3];
++
++		if(cs != c)
++		{
++			return (1);
++		}
++	}
++	return 0;
++}*/
++
+ int32_t check_extended_mode(struct s_client *cl, char *msg)
+ {
+ 	// Extended mode: if PARTNER String is ending with [PARAM], extended mode is activated
+@@ -3266,7 +3292,10 @@ int32_t cc_parse_msg(struct s_client *cl, uint8_t *buf, int32_t l)
+ 							add_sid_block(card, &srvid, true);
+ 						}
+ 
+-						card->rating = MAX(card->rating, MIN_RATING);
++						if(card->rating < MIN_RATING)
++						{
++							card->rating = MIN_RATING;
++						}
+ 
+ 						if(cfg.cc_forward_origin_card && card->origin_reader == rdr)
+ 						{
+@@ -3575,11 +3604,19 @@ int32_t cc_parse_msg(struct s_client *cl, uint8_t *buf, int32_t l)
+ 								cs_log_dbg(D_READER, "%s card %04X is too slow, moving to the end...", getprefix(), card->id);
+ 								move_card_to_end(cl, card);
+ 
+-								card->rating = MAX(card->rating - 1, MIN_RATING);
++								card->rating--;
++								if(card->rating < MIN_RATING)
++								{
++									card->rating = MIN_RATING;
++								}
+ 							}
+ 							else
+ 							{
+-								card->rating = MIN(card->rating + 1, MAX_RATING);
++								card->rating++;
++								if(card->rating > MAX_RATING)
++								{
++									card->rating = MAX_RATING;
++								}
+ 							}
+ 						}
+ 					}
+@@ -3827,7 +3864,7 @@ int32_t cc_parse_msg(struct s_client *cl, uint8_t *buf, int32_t l)
+ 			// Unkwon commands... need workout algo
+ 			if(cl->typ == 'c') // client connection
+ 			{
+-				//switching to an older version and then disconnect...
++				//switching to an oder version and then disconnect...
+ 				cs_strncpy(cfg.cc_version, version[0], sizeof(cfg.cc_version));
+ 				ret = -1;
  			}
 diff --git a/module-cw-cycle-check.c b/module-cw-cycle-check.c
 index 999b6bb8..9afb237c 100644
@@ -11109,8 +11361,168 @@ index 10be173b..f603f85c 100644
  			snprintf(sbuf, 256, "[%c--CCC]%8X|%c|%d|%s|%d|%d|%s|%d|%s|%s|%s|%d|%04X@%06X:%04X|%s|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d\n",
  					 id, cl->tid, cl->typ, cnr, usr, cau, cl->crypted,
  					 cs_inet_ntoa(cl->ip), cl->port, client_get_proto(cl),
+diff --git a/module-newcamd-des.c b/module-newcamd-des.c
+index 8ce6ae37..3e07101b 100644
+--- a/module-newcamd-des.c
++++ b/module-newcamd-des.c
+@@ -2,8 +2,15 @@
+ #include "module-newcamd-des.h"
+ #include "oscam-string.h"
+ 
++#define DES_ECS2_DECRYPT (DES_IP | DES_IP_1 | DES_RIGHT)
++#define DES_ECS2_CRYPT   (DES_IP | DES_IP_1)
++
+ #define CRYPT        0
+ #define HASH         1
++#define F_EURO_S2    0
++#define F_TRIPLE_DES 1
++
++#define TestBit(addr, bit) ((addr) & (1 << bit))
+ 
+ extern const int32_t CWS_NETMSGSIZE;
+ 
+@@ -420,17 +427,80 @@ static void des_random_get(uint8_t *buffer, uint8_t len)
+ 	}
+ }
+ 
+-static void EuroDes(uint8_t key[], uint8_t operatingMode, uint8_t data[])
++static uint8_t getmask(uint8_t *OutData, uint8_t *Mask, uint8_t I, uint8_t J)
+ {
+-	/* Eurocrypt 3-DES */
+-	uint8_t mode = (operatingMode == HASH) ? 0 : DES_RIGHT;
+-	nc_des(key, (uint8_t)(DES_IP | mode), data);
++	uint8_t K, B, M, M1 , D, DI, MI;
+ 
+-	mode ^= DES_RIGHT;
+-	nc_des(key + 8, mode, data);
++	K = I ^ J;
++	DI = 7;
++	if((K & 4) == 4)
++	{
++		K ^= 7;
++		DI ^= 7;
++	}
++	MI = 3;
++	MI &= J;
++	K ^= MI;
++	K += MI;
++	if((K & 4) == 4)
++	{
++		return 0;
++	}
++	DI ^= J;
++	D = OutData[DI];
++	MI = 0;
++	MI += J;
++	M1 = Mask[MI];
++	MI ^= 4;
++	M = Mask[MI];
++	B = 0;
++	for(K = 0; K <= 7; K++)
++	{
++		if((D & 1) == 1) { B += M; }
++		D = (D >> 1) + ((B & 1) << 7);
++		B = B >> 1;
++	}
++	return D ^ M1;
++}
+ 
+-	mode ^= DES_RIGHT;
+-	nc_des(key, (uint8_t)(mode | DES_IP_1), data);
++static void v2mask(uint8_t *cw, uint8_t *mask)
++{
++	int i, j;
++
++	for(i = 7; i >= 0; i--)
++		for(j = 7; j >= 4; j--)
++			{ cw[i] ^= getmask(cw, mask, i, j); }
++	for(i = 0; i <= 7; i++)
++		for(j = 0; j <= 3; j++)
++			{ cw[i] ^= getmask(cw, mask, i, j); }
++}
++
++static void EuroDes(uint8_t key1[], uint8_t key2[], uint8_t operatingMode, uint8_t data[])
++{
++	uint8_t mode;
++
++	if(key1[7]) /* Viaccess */
++	{
++		mode = (operatingMode == HASH) ? DES_ECM_HASH : DES_ECM_CRYPT;
++
++		if(key2 != NULL)
++			{ v2mask(data, key2); }
++		nc_des(key1, mode, data);
++		if(key2 != NULL)
++			{ v2mask(data, key2); }
++	}
++	else
++	{
++		/* Eurocrypt 3-DES */
++		mode = (operatingMode == HASH) ? 0 : DES_RIGHT;
++		nc_des(key1, (uint8_t)(DES_IP | mode), data);
++
++		mode ^= DES_RIGHT;
++		nc_des(key2, mode, data);
++
++		mode ^= DES_RIGHT;
++		nc_des(key1, (uint8_t)(mode | DES_IP_1), data);
++	}
+ }
+ 
+ int nc_des_encrypt(uint8_t *buffer, int len, uint8_t *deskey)
+@@ -454,7 +524,7 @@ int nc_des_encrypt(uint8_t *buffer, int len, uint8_t *deskey)
+ 	{
+ 		uint8_t j;
+ 		for(j = 0; j < 8; j++) { buffer[i + j] ^= ivec[j]; }
+-		EuroDes(deskey, HASH, buffer + i);
++		EuroDes(deskey, deskey + 8, HASH, buffer + i);
+ 		memcpy(ivec, buffer + i, 8);
+ 	}
+ 	len += 8;
+@@ -478,7 +548,7 @@ int nc_des_decrypt(uint8_t *buffer, int len, uint8_t *deskey)
+ 
+ 		memcpy(ivec, nextIvec, 8);
+ 		memcpy(nextIvec, buffer + i, 8);
+-		EuroDes(deskey, CRYPT, buffer + i);
++		EuroDes(deskey, deskey + 8, CRYPT, buffer + i);
+ 		for(j = 0; j < 8; j++)
+ 			{ buffer[i + j] ^= ivec[j]; }
+ 	}
+@@ -487,7 +557,7 @@ int nc_des_decrypt(uint8_t *buffer, int len, uint8_t *deskey)
+ 	return len;
+ }
+ 
+-void nc_des_login_key_get(uint8_t *key1, uint8_t *key2, int len, uint8_t *des16)
++uint8_t *nc_des_login_key_get(uint8_t *key1, uint8_t *key2, int len, uint8_t *des16)
+ {
+ 	uint8_t des14[14];
+ 	int i;
+@@ -497,4 +567,5 @@ void nc_des_login_key_get(uint8_t *key1, uint8_t *key2, int len, uint8_t *des16)
+ 	des16 = des_key_spread(des14, des16);
+ 	doPC1(des16);
+ 	doPC1(des16 + 8);
++	return des16;
+ }
+diff --git a/module-newcamd-des.h b/module-newcamd-des.h
+index 7b048140..25701ac8 100644
+--- a/module-newcamd-des.h
++++ b/module-newcamd-des.h
+@@ -6,9 +6,12 @@
+ #define DES_RIGHT 4
+ #define DES_HASH  8
+ 
++#define DES_ECM_CRYPT    0
++#define DES_ECM_HASH     DES_HASH
++
+ void nc_des(uint8_t key[], uint8_t mode, uint8_t data[]);
+ int nc_des_encrypt(uint8_t *buffer, int len, uint8_t *deskey);
+ int nc_des_decrypt(uint8_t *buffer, int len, uint8_t *deskey);
+-void nc_des_login_key_get(uint8_t *key1, uint8_t *key2, int len, uint8_t *des16);
++uint8_t *nc_des_login_key_get(uint8_t *key1, uint8_t *key2, int len, uint8_t *des16);
+ 
+ #endif
 diff --git a/module-newcamd.c b/module-newcamd.c
-index fc3f83cf..7c23924c 100644
+index 679f25ac..7c23924c 100644
 --- a/module-newcamd.c
 +++ b/module-newcamd.c
 @@ -1118,6 +1118,13 @@ static int8_t newcamd_auth_client(IN_ADDR_T ip, uint8_t *deskey)
@@ -11136,6 +11548,25 @@ index fc3f83cf..7c23924c 100644
  					{
  						for(k = 0; k < aureader->nprov; k++)
  						{
+@@ -1691,10 +1698,16 @@ void newcamd_idle(void)
+ 
+ int32_t newcamd_client_init(struct s_client *client)
+ {
++	char ptxt[1]
++#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L //gcc-15+
++	__attribute__((nonstring))
++#endif
++	= { "\0" };
++
+ 	client->ncd_proto = client->reader->ncd_proto;
+ 
+-	cs_log("proxy %s:%d newcamd52%d (fd=%d)", client->reader->device, client->reader->r_port,
+-			(client->reader->ncd_proto == NCD_525) ? 5 : 4, client->udp_fd);
++	cs_log("proxy %s:%d newcamd52%d (fd=%d%s)", client->reader->device, client->reader->r_port,
++			(client->reader->ncd_proto == NCD_525) ? 5 : 4, client->udp_fd, ptxt);
+ 
+ 	// try to connect. ignore possible failures
+ 	// idle reconnect (tcp_ito = -1) will trigger an additional connect anyway
 diff --git a/module-stat.c b/module-stat.c
 index 324c43bc..5ca3aedd 100644
 --- a/module-stat.c
@@ -12673,7 +13104,7 @@ index 3494942a..2a2965ce 100644
  			cs_log("error: too much data received from %s", cs_inet_ntoa(in));
  			NULLFREE(*result);
 diff --git a/oscam-chk.c b/oscam-chk.c
-index 624d1d3f..1b54442a 100644
+index 1f44e3b6..1b54442a 100644
 --- a/oscam-chk.c
 +++ b/oscam-chk.c
 @@ -894,7 +894,7 @@ int32_t matching_reader(ECM_REQUEST *er, struct s_reader *rdr)
@@ -12712,6 +13143,32 @@ index 624d1d3f..1b54442a 100644
  	{
  		return 1; // reader caid is not real caid
  	}
+@@ -1253,10 +1253,10 @@ int8_t chk_halfCW(ECM_REQUEST *er, uint8_t *cw)
+ /**
+  * Check for NULL nodeid
+  **/
+-int32_t chk_is_null_nodeid(uint8_t node_id[])
++int32_t chk_is_null_nodeid(uint8_t node_id[], uint8_t len)
+ {
+ 	int8_t i;
+-	for(i = 0; i < 8; i++)
++	for(i = 0; i < len; i++)
+ 	{
+ 		if(node_id[i]) { return 0; }
+ 	}
+diff --git a/oscam-chk.h b/oscam-chk.h
+index 38b3f3a3..1686673e 100644
+--- a/oscam-chk.h
++++ b/oscam-chk.h
+@@ -35,7 +35,7 @@ int32_t chk_bcaid(ECM_REQUEST *er, CAIDTAB *ctab);
+ int32_t chk_is_null_CW(uint8_t cw[]);
+ int8_t is_halfCW_er(ECM_REQUEST *er);
+ int8_t chk_halfCW(ECM_REQUEST *er, uint8_t *cw);
+-int32_t chk_is_null_nodeid(uint8_t node_id[]);
++int32_t chk_is_null_nodeid(uint8_t node_id[], uint8_t len);
+ bool check_client(struct s_client *cl);
+ uint16_t caidvaluetab_get_value(CAIDVALUETAB *cv, uint16_t caid, uint16_t default_value);
+ int32_t chk_is_fakecw(uint8_t *cw);
 diff --git a/oscam-conf-chk.c b/oscam-conf-chk.c
 index 39d86f0f..b3b615ea 100644
 --- a/oscam-conf-chk.c
@@ -12917,6 +13374,31 @@ index f91c0daa..1d3e1e3a 100644
  	if(prid == provid)
  	{
  		rdr_log_dbg(reader, D_EMM, "reader auprovid = %06X matching with emm provid = %06X -> SEND!", prid, provid);
+diff --git a/oscam-log.c b/oscam-log.c
+index a335369c..c1c6fb54 100644
+--- a/oscam-log.c
++++ b/oscam-log.c
+@@ -253,7 +253,10 @@ LLIST *log_history = NULL;
+ */
+ void cs_reinit_loghist(uint32_t size)
+ {
+-	cfg.loghistorylines = size;
++	if(cfg.loghistorylines != size)
++	{
++		cfg.loghistorylines = size;
++	}
+ }
+ #endif
+ 
+@@ -267,7 +270,7 @@ static uint8_t get_log_header(char *txt, int32_t txt_size, uint8_t* hdr_logcount
+ 	int32_t tmp;
+ 
+ 	cs_ftime(&log_ts);
+-	time_t walltime = log_ts.time;
++	time_t walltime = cs_walltime(&log_ts);
+ 	localtime_r(&walltime, &lt);
+ 
+ 	tmp = snprintf(txt, txt_size, "[LOG000]%04d/%02d/%02d %02d:%02d:%02d %08X %c ",
 diff --git a/oscam-simples.c b/oscam-simples.c
 index 576804c9..6e1c7137 100644
 --- a/oscam-simples.c
@@ -12938,11 +13420,67 @@ index 576804c9..6e1c7137 100644
  	if(caid == 0x4ABF) { return "dgcrypt"; }
  	return "unknown";
  }
+diff --git a/oscam-string.c b/oscam-string.c
+index 76055a29..89121f84 100644
+--- a/oscam-string.c
++++ b/oscam-string.c
+@@ -45,7 +45,21 @@ bool cs_realloc(void *result, size_t size)
+  */
+ size_t cs_strlen(const char *c)
+ {
+-	return c ? strlen(c) : 0;
++	if (c == NULL)
++	{
++		return 0;
++	}
++	else
++	{
++		if (c[0] == '\0')
++		{
++			return 0;
++		}
++		else
++		{
++			return strlen(c);
++		}
++	}
+ }
+ 
+ /* Allocates a new empty string and copies str into it. You need to free() the result. */
+@@ -150,7 +164,8 @@ char *strtolower(char *txt)
+ 	char *p;
+ 	for(p = txt; *p; p++)
+ 	{
+-		*p = tolower((uint8_t) *p);
++		if(isupper((uint8_t)*p))
++			{ *p = tolower((uint8_t) * p); }
+ 	}
+ 	return txt;
+ }
+@@ -161,7 +176,8 @@ char *strtoupper(char *txt)
+ 	char *p;
+ 	for(p = txt; *p; p++)
+ 	{
+-		*p = toupper((uint8_t) *p);
++		if(islower((uint8_t)*p))
++			{ *p = toupper((uint8_t)*p); }
+ 	}
+ 	return txt;
+ }
 diff --git a/oscam-time.c b/oscam-time.c
-index def886e5..0fceed5b 100644
+index 996c77b5..0fceed5b 100644
 --- a/oscam-time.c
 +++ b/oscam-time.c
-@@ -170,13 +170,27 @@ void cs_ftimeus(struct timeb *tp)
+@@ -1,6 +1,8 @@
+ #include "globals.h"
+ #include "oscam-time.h"
+ 
++static enum clock_type clock_type = CLOCK_TYPE_UNKNOWN;
++
+ #if defined(CLOCKFIX)
+ struct timeval lasttime; // holds previous time to detect systemtime adjustments due to eg transponder change on dvb receivers
+ #endif
+@@ -168,13 +170,27 @@ void cs_ftimeus(struct timeb *tp)
  void cs_sleepms(uint32_t msec)
  {
  	// does not interfere with signals like sleep and usleep do
@@ -12973,7 +13511,7 @@ index def886e5..0fceed5b 100644
  	}
  	errno = olderrno;
  }
-@@ -184,13 +198,28 @@ void cs_sleepms(uint32_t msec)
+@@ -182,13 +198,28 @@ void cs_sleepms(uint32_t msec)
  void cs_sleepus(uint32_t usec)
  {
  	// does not interfere with signals like sleep and usleep do
@@ -13005,8 +13543,185 @@ index def886e5..0fceed5b 100644
  	}
  	errno = olderrno;
  }
+@@ -238,10 +269,48 @@ int64_t add_ms_to_timeb_diff(struct timeb *tb, int32_t ms)
+ 	return comp_timeb(tb, &tb_now);
+ }
+ 
++#if defined(__UCLIBC__)
++#define __UCLIBC_VER (__UCLIBC_MAJOR__ * 10000 + __UCLIBC_MINOR__ * 100 + __UCLIBC_SUBLEVEL__)
++#else
++#define __UCLIBC_VER 999999
++#endif
++
++#if defined(__GLIBC__)
++#define __GLIBCVER (__GLIBC__ * 100 + __GLIBC_MINOR__)
++#else
++#define __GLIBCVER 9999
++#endif
++
++// Assume we have HAVE_pthread_condattr_setclock if CLOCK_MONOTONIC is defined
++#if defined(CLOCKFIX) && defined(CLOCK_MONOTONIC)
++#define HAVE_pthread_condattr_setclock 1
++#endif
++
++#if defined(HAVE_pthread_condattr_setclock)
++// UCLIBC 0.9.31 does not have pthread_condattr_setclock
++#if __UCLIBC_VER < 932
++#undef HAVE_pthread_condattr_setclock
++#endif
++// glibc 2.3.6 in ppc old toolchain do not have pthread_condattr_setclock
++#if __GLIBCVER < 204
++#undef HAVE_pthread_condattr_setclock
++#endif
++// android's libc not have pthread_condattr_setclock
++#if __BIONIC__
++#undef HAVE_pthread_condattr_setclock
++#endif
++#endif
++
+ void __cs_pthread_cond_init(const char *n, pthread_cond_t *cond)
+ {
+ 	pthread_condattr_t attr;
+ 	SAFE_CONDATTR_INIT_R(&attr, n); // init condattr with defaults
++#if 0
++#if defined(HAVE_pthread_condattr_setclock)
++	enum clock_type ctype = cs_getclocktype();
++	SAFE_CONDATTR_SETCLOCK_R(&attr, (ctype == CLOCK_TYPE_MONOTONIC) ? CLOCK_MONOTONIC : CLOCK_REALTIME, n);
++#endif
++#endif
+ 	SAFE_COND_INIT_R(cond, &attr, n); // init thread with right clock assigned
+ 	pthread_condattr_destroy(&attr);
+ }
+@@ -250,10 +319,17 @@ void __cs_pthread_cond_init_nolog(const char *n, pthread_cond_t *cond)
+ {
+ 	pthread_condattr_t attr;
+ 	SAFE_CONDATTR_INIT_NOLOG_R(&attr, n); // init condattr with defaults
++#if 0
++#if defined(HAVE_pthread_condattr_setclock)
++	enum clock_type ctype = cs_getclocktype();
++	SAFE_CONDATTR_SETCLOCK_NOLOG_R(&attr, (ctype == CLOCK_TYPE_MONOTONIC) ? CLOCK_MONOTONIC : CLOCK_REALTIME, n);
++#endif
++#endif
+ 	SAFE_COND_INIT_NOLOG_R(cond, &attr, n); // init thread with right clock assigned
+ 	pthread_condattr_destroy(&attr);
+ }
+ 
++
+ void sleepms_on_cond(const char *n, pthread_mutex_t *mutex, pthread_cond_t *cond, uint32_t msec)
+ {
+ 	struct timespec ts;
+@@ -275,12 +351,35 @@ void cs_pthread_cond_init_nolog(const char *n, pthread_mutex_t *mutex, pthread_c
+ 	__cs_pthread_cond_init(n, cond);
+ }
+ 
++enum clock_type cs_getclocktype(void) {
++	if (clock_type == CLOCK_TYPE_UNKNOWN) {
++		struct timespec ts;
++		cs_gettime(&ts); // init clock type
++	}
++	return clock_type;
++}
++
++time_t cs_walltime(struct timeb *tp)
++{
++	// we dont need to fetch time again and calculate if oscam is already using realtimeclock!
++	if (clock_type != CLOCK_TYPE_MONOTONIC)
++		return tp->time;
++
++	struct timespec ts;
++	struct timeval tv;
++
++	cs_gettime(&ts);
++	gettimeofday(&tv, NULL);
++	int64_t skew = tv.tv_sec - ts.tv_sec;
++	return(tp->time + skew);
++}
++
+ /* Return real time clock value calculated based on cs_gettime(). Use this instead of time() */
+ time_t cs_time(void)
+ {
+ 	struct timeb tb;
+ 	cs_ftime(&tb);
+-	return tb.time;
++	return cs_walltime(&tb);
+ }
+ 
+ #ifdef __MACH__
+@@ -306,5 +405,39 @@ void cs_gettime(struct timespec *ts)
+ #endif
+ 	ts->tv_sec = tv.tv_sec;
+ 	ts->tv_nsec = tv.tv_usec * 1000;
++	clock_type = CLOCK_TYPE_REALTIME;
++	return;
++#if 0
++#if !defined(CLOCKFIX) || (!defined(CLOCK_MONOTONIC) && !defined(__MACH__))
++	struct timeval tv;
++	gettimeofday(&tv, NULL);
++	ts->tv_sec = tv.tv_sec;
++	ts->tv_nsec = tv.tv_usec * 1000;
++	clock_type = CLOCK_TYPE_REALTIME;
+ 	return;
++#elif defined (__MACH__)
++// OS X does not have clock_gettime, use clock_get_time
++	clock_serv_t cclock;
++	mach_timespec_t mts;
++	host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
++	clock_get_time(cclock, &mts);
++	mach_port_deallocate(mach_task_self(), cclock);
++	ts->tv_sec = mts.tv_sec;
++	ts->tv_nsec = mts.tv_nsec;
++	clock_type = CLOCK_TYPE_REALTIME;
++#else
++	if (clock_type == CLOCK_TYPE_REALTIME) // monotonic returned error
++	{
++		clock_gettime(CLOCK_REALTIME, ts);
++		return;
++	}
++	int32_t	ret = clock_gettime(CLOCK_MONOTONIC, ts);
++	clock_type = CLOCK_TYPE_MONOTONIC;
++	if ((ret < 0 && errno == EINVAL)) // Error fetching time from this source (Shouldn't happen on modern Linux)
++	{
++		clock_gettime(CLOCK_REALTIME, ts);
++		clock_type = CLOCK_TYPE_REALTIME;
++	}
++#endif
++#endif
+ }
+diff --git a/oscam-time.h b/oscam-time.h
+index 50fa5c27..d04f64b4 100644
+--- a/oscam-time.h
++++ b/oscam-time.h
+@@ -1,6 +1,12 @@
+ #ifndef OSCAM_TIME_H_
+ #define OSCAM_TIME_H_
+ 
++enum clock_type {
++	CLOCK_TYPE_UNKNOWN,
++	CLOCK_TYPE_REALTIME,
++	CLOCK_TYPE_MONOTONIC,
++};
++
+ int64_t comp_timeb(struct timeb *tpa, struct timeb *tpb);
+ int64_t comp_timebus(struct timeb *tpa, struct timeb *tpb);
+ time_t cs_timegm(struct tm *tm);
+@@ -15,12 +21,15 @@ void add_ms_to_timespec(struct timespec *timeout, int32_t msec);
+ void add_ms_to_timeb(struct timeb *tb, int32_t ms);
+ int64_t add_ms_to_timeb_diff(struct timeb *tb, int32_t ms);
+ 
++time_t cs_walltime(struct timeb *tp);
+ time_t cs_time(void);
+ 
+ static inline bool cs_valid_time(struct timeb *tp) { return tp->time != 0; }
+ 
+ void cs_gettime(struct timespec *ts);
+ 
++enum clock_type cs_getclocktype(void);
++
+ void __cs_pthread_cond_init(const char *n, pthread_cond_t *cond);
+ void cs_pthread_cond_init(const char *n, pthread_mutex_t *mutex, pthread_cond_t *cond);
+ 
 diff --git a/oscam.c b/oscam.c
-index 5ea33c9d..3262577e 100644
+index 6560b9ef..3262577e 100644
 --- a/oscam.c
 +++ b/oscam.c
 @@ -41,6 +41,10 @@
@@ -13020,7 +13735,21 @@ index 5ea33c9d..3262577e 100644
  #ifdef WITH_SSL
  #include <openssl/crypto.h>
  #include <openssl/ssl.h>
-@@ -458,6 +462,8 @@ static void write_versionfile(bool use_stdout)
+@@ -445,7 +449,12 @@ static void write_versionfile(bool use_stdout)
+ 	write_conf(CW_CYCLE_CHECK, "CW Cycle Check support");
+ 	write_conf(LCDSUPPORT, "LCD support");
+ 	write_conf(LEDSUPPORT, "LED support");
+-	write_conf(CLOCKFIX, "Clockfix with realtime clock");
++	switch (cs_getclocktype())
++	{
++		case CLOCK_TYPE_UNKNOWN  : write_conf(CLOCKFIX, "Clockfix with UNKNOWN clock"); break;
++		case CLOCK_TYPE_REALTIME : write_conf(CLOCKFIX, "Clockfix with realtime clock"); break;
++		case CLOCK_TYPE_MONOTONIC: write_conf(CLOCKFIX, "Clockfix with monotonic clock"); break;
++	}
+ 	write_conf(IPV6SUPPORT, "IPv6 support");
+ #if defined(__arm__) || defined(__aarch64__)
+ 	write_conf(WITH_ARM_NEON, "ARM NEON (SIMD/MPE) support");
+@@ -453,6 +462,8 @@ static void write_versionfile(bool use_stdout)
  #ifdef WITH_SIGNING
  	write_conf(WITH_SIGNING, "Binary signing support");
  #endif
@@ -13029,7 +13758,7 @@ index 5ea33c9d..3262577e 100644
  
  	fprintf(fp, "\n");
  	write_conf(MODULE_CAMD33, "camd 3.3x");
-@@ -499,7 +505,6 @@ static void write_versionfile(bool use_stdout)
+@@ -494,7 +505,6 @@ static void write_versionfile(bool use_stdout)
  		write_cardreaderconf(CARDREADER_INTERNAL_AZBOX, "internal_azbox");
  		write_cardreaderconf(CARDREADER_INTERNAL_COOLAPI, "internal_coolapi");
  		write_cardreaderconf(CARDREADER_INTERNAL_COOLAPI2, "internal_coolapi2");
@@ -13037,7 +13766,7 @@ index 5ea33c9d..3262577e 100644
  		write_cardreaderconf(CARDREADER_INTERNAL_SCI, "internal_sci");
  		write_cardreaderconf(CARDREADER_SC8IN1, "sc8in1");
  		write_cardreaderconf(CARDREADER_MP35, "mp35");
-@@ -1645,8 +1650,6 @@ const struct s_cardreader *cardreaders[] =
+@@ -1640,8 +1650,6 @@ const struct s_cardreader *cardreaders[] =
  	&cardreader_internal_cool,
  #elif defined(CARDREADER_INTERNAL_COOLAPI2)
  	&cardreader_internal_cool,
@@ -13046,7 +13775,7 @@ index 5ea33c9d..3262577e 100644
  #elif defined(CARDREADER_INTERNAL_SCI)
  	&cardreader_internal_sci,
  #endif
-@@ -1677,6 +1680,9 @@ const struct s_cardreader *cardreaders[] =
+@@ -1672,6 +1680,9 @@ const struct s_cardreader *cardreaders[] =
  #ifdef CARDREADER_STINGER
  	&cardreader_stinger,
  #endif
@@ -13056,7 +13785,16 @@ index 5ea33c9d..3262577e 100644
  
  	NULL
  };
-@@ -1858,6 +1864,9 @@ int32_t main(int32_t argc, char *argv[])
+@@ -1724,6 +1735,8 @@ int32_t main(int32_t argc, char *argv[])
+ 	run_tests();
+ 	int32_t i, j;
+ 	prog_name = argv[0];
++	struct timespec start_ts;
++	cs_gettime(&start_ts); // Initialize clock_type
+ 
+ 	if(pthread_key_create(&getclient, NULL))
+ 	{
+@@ -1851,6 +1864,9 @@ int32_t main(int32_t argc, char *argv[])
  
  	init_sidtab();
  	init_readerdb();
@@ -13097,6 +13835,238 @@ index efdd19b3..2c8fc7dd 100644
  	for(i = 0; cardsystems[i]; i++)
  	{
  		NULLFREE(reader->csystem_data);
+diff --git a/reader-conax.c b/reader-conax.c
+index 535012e6..3b08ade2 100644
+--- a/reader-conax.c
++++ b/reader-conax.c
+@@ -6,47 +6,86 @@
+ 
+ static int32_t CWPK_CNX(struct s_reader *reader,uint8_t *msg)
+ {
+-	uint8_t CWp[16], CWs[16];
+-
+-	memcpy(CWp, msg + 7, 8);
+-	memcpy(CWp + 8, msg + 22, 8);
+-
+-	des_ecb3_decrypt(CWp, reader->cwpk_mod);
+-	des_ecb3_decrypt(CWp + 8, reader->cwpk_mod);
+-
+-	memcpy(CWs, CWp + 4, 4);
+-	memcpy(CWs + 4, CWp, 4);
+-	memcpy(CWs + 8, CWp + 12, 4);
+-	memcpy(CWs + 12, CWp + 8, 4);
++int32_t ret = 0;
++
++uint8_t CWp1[8];
++uint8_t CWp2[8];
++uint8_t CWs1[8];
++uint8_t CWs2[8];
++
++CWp1[0] = msg[7];
++CWp1[1] = msg[8];
++CWp1[2] = msg[9];
++CWp1[3] = msg[10];
++CWp1[4] = msg[11];
++CWp1[5] = msg[12];
++CWp1[6] = msg[13];
++CWp1[7] = msg[14];
++
++CWp2[0] = msg[22];
++CWp2[1] = msg[23];
++CWp2[2] = msg[24];
++CWp2[3] = msg[25];
++CWp2[4] = msg[26];
++CWp2[5] = msg[27];
++CWp2[6] = msg[28];
++CWp2[7] = msg[29];
++
++des_ecb3_decrypt(CWp1,reader->cwpk_mod);
++des_ecb3_decrypt(CWp2,reader->cwpk_mod);
++CWs1[0] = CWp1[4];
++CWs1[1] = CWp1[5];
++CWs1[2] = CWp1[6];
++CWs1[3] = CWp1[7];
++CWs1[4] = CWp1[0];
++CWs1[5] = CWp1[1];
++CWs1[6] = CWp1[2];
++CWs1[7] = CWp1[3];
++
++CWs2[0] = CWp2[4];
++CWs2[1] = CWp2[5];
++CWs2[2] = CWp2[6];
++CWs2[3] = CWp2[7];
++CWs2[4] = CWp2[0];
++CWs2[5] = CWp2[1];
++CWs2[6] = CWp2[2];
++CWs2[7] = CWp2[3];
++
++int chkok = 1;
++if(((CWs1[0] + CWs1[1] + CWs1[2]) & 0xFF) != CWs1[3])
++{
++	chkok = 0;
++	rdr_log(reader, "CW0 checksum error [0]");
++}
++if(((CWs1[4] + CWs1[5] + CWs1[6]) & 0xFF) != CWs1[7])
++{
++	chkok = 0;
++	rdr_log(reader, "CW0 checksum error [1]");
++}
++if(((CWs2[0] + CWs2[1] + CWs2[2]) & 0xFF) != CWs2[3])
++{
++	chkok = 0;
++	rdr_log(reader, "CW1 checksum error [0]");
++}
++if(((CWs2[4] + CWs2[5] + CWs2[6]) & 0xFF) != CWs2[7])
++{
++	chkok = 0;
++	rdr_log(reader, "CW1 checksum error [1]");
++}
+ 
+-	int chkok = 1;
+-	if(((CWs[0] + CWs[1] + CWs[2]) & 0xFF) != CWs[3])
+-	{
+-		chkok = 0;
+-		rdr_log(reader, "CW0 checksum error [0]");
+-	}
+-	if(((CWs[4] + CWs[5] + CWs[6]) & 0xFF) != CWs[7])
+-	{
+-		chkok = 0;
+-		rdr_log(reader, "CW0 checksum error [1]");
+-	}
+-	if(((CWs[8] + CWs[9] + CWs[10]) & 0xFF) != CWs[11])
+-	{
+-		chkok = 0;
+-		rdr_log(reader, "CW1 checksum error [0]");
+-	}
+-	if(((CWs[12] + CWs[13] + CWs[14]) & 0xFF) != CWs[15])
+-	{
+-		chkok = 0;
+-		rdr_log(reader, "CW1 checksum error [1]");
+-	}
++if(chkok == 1)
++{
++	memcpy(&msg[7],CWs1,0x08);
++	memcpy(&msg[22],CWs2,0x08);
+ 
+-	if(!chkok)
+-		return -8;
++	ret = 0;
++}
++if(chkok != 1)
++{
++	ret = -8;
++}
+ 
+-	memcpy(msg + 7, CWs, 8);
+-	memcpy(msg + 22, CWs + 8, 8);
+-	return 0;
++return ret;
+ }
+ 
+ static int32_t RSA_CNX(struct s_reader *reader, uint8_t *msg, uint8_t *mod, uint8_t *exp, uint32_t cta_lr, uint32_t modbytes, uint32_t expbytes)
+diff --git a/reader-dre-st20.c b/reader-dre-st20.c
+index e0170621..d605cde8 100644
+--- a/reader-dre-st20.c
++++ b/reader-dre-st20.c
+@@ -32,11 +32,12 @@ typedef struct
+ 	int sptr, stack[STACKMAX];
+ 	uint8_t iram[0x1800];
+ 	int invalid;
++	int verbose;
+ } st20_context_t;
+ 
+ static bool st20_set_flash(st20_context_t *ctx, uint8_t *m, uint32_t len);
+ static bool st20_set_ram(st20_context_t *ctx, uint8_t *m, uint32_t len);
+-static void st20_init(st20_context_t *ctx, uint32_t IPtr, uint32_t WPtr);
++static void st20_init(st20_context_t *ctx, uint32_t IPtr, uint32_t WPtr, int verbose);
+ static void st20_free(st20_context_t *ctx);
+ 
+ static void st20_set_call_frame(st20_context_t *ctx, uint32_t raddr, int p1, int p2, int p3);
+@@ -48,7 +49,7 @@ static void st20_wbyte(st20_context_t *ctx, uint32_t off, uint8_t val);
+ static uint32_t st20_rword(st20_context_t *ctx, uint32_t off);
+ static void st20_wword(st20_context_t *ctx, uint32_t off, uint32_t val);
+ 
+-#define INVALID_VALUE 0xCC
++#define INVALID_VALUE 0xCCCCCCCC
+ #define ERRORVAL      0xDEADBEEF
+ 
+ #define MININT        0x7FFFFFFF
+@@ -367,13 +368,14 @@ static bool st20_set_ram(st20_context_t *ctx, uint8_t *m, uint32_t len)
+ 	return true;
+ }
+ 
+-static void st20_init(st20_context_t *ctx, uint32_t IPtr, uint32_t WPtr)
++static void st20_init(st20_context_t *ctx, uint32_t IPtr, uint32_t WPtr, int32_t verbose)
+ {
+ 	ctx->Wptr = WPtr;
+ 	ctx->Iptr = IPtr;
+ 	memset(ctx->stack, INVALID_VALUE, sizeof(ctx->stack));
+ 	ctx->sptr = STACKMAX - 3;
+ 	memset(ctx->iram, 0, sizeof(ctx->iram));
++	ctx->verbose = verbose;
+ }
+ 
+ static void st20_free(st20_context_t *ctx)
+@@ -429,7 +431,7 @@ int st20_run(uint8_t* snip, uint32_t snip_len, int addr, uint8_t *data, uint16_t
+ 			error = FLA_ERR;
+ 			break;
+ 		}
+-		st20_init(&ctx, FLASHS + addr, RAMS + 0x100);
++		st20_init(&ctx, FLASHS + addr, RAMS + 0x100, 1);
+ 		st20_set_call_frame(&ctx, 0, RAMS, RAMS, RAMS);
+ 
+ 		for(i = 0; i < 8; i++)
+diff --git a/reader-nagracak7.c b/reader-nagracak7.c
+index 3cd4541c..5b64ec3d 100644
+--- a/reader-nagracak7.c
++++ b/reader-nagracak7.c
+@@ -1,5 +1,6 @@
+ #include "globals.h"
+ #ifdef READER_NAGRA_MERLIN
++#include "math.h"
+ #include "cscrypt/bn.h"
+ #include "cscrypt/idea.h"
+ #include "csctapi/icc_async.h"
+@@ -631,10 +632,10 @@ static int32_t ParseDataType(struct s_reader *reader, uint8_t dt, uint8_t *cta_r
+ 	return ERROR;
+ }
+ 
+-static int32_t CAK7do_cmd(struct s_reader *reader, uint8_t dt, uint8_t *res, uint16_t *rlen, int32_t sub, uint8_t retlen)
++static int32_t CAK7do_cmd(struct s_reader *reader, uint8_t dt, uint8_t len, uint8_t *res, uint16_t *rlen, int32_t sub, uint8_t retlen)
+ {
+ 	uint8_t dtdata[0x10];
+-	memset(dtdata, 0xCC, 0x10);
++	memset(dtdata, 0xCC, len);
+ 	dtdata[ 7] = 0x04;
+ 	dtdata[ 8] = 0x04;
+ 	dtdata[ 9] = (sub >> 16) & 0xFF;
+@@ -655,7 +656,7 @@ static int32_t CAK7GetDataType(struct s_reader *reader, uint8_t dt)
+ 
+ 	while(1)
+ 	{
+-		CAK7do_cmd(reader, dt, cta_res, &cta_lr, sub, retlen);
++		CAK7do_cmd(reader, dt, 0x10, cta_res, &cta_lr, sub, retlen);
+ 		rdr_log_dump_dbg(reader, D_READER, cta_res, cta_lr, "Decrypted Answer:");
+ 
+ 		// hier eigentlich check auf 90 am ende usw... obs halt klarging ...
+@@ -705,8 +706,15 @@ static int32_t CAK7GetDataType(struct s_reader *reader, uint8_t dt)
+ 
+ static void sub_6AD78(uint32_t *dinit) // gbox function
+ {
+-	double res = *dinit * 16807.0;
+-	*dinit = (uint32_t)(res - (uint32_t)(res / 2147483647.0) * 2147483647.0);
++	uint32_t v0 = (uint32_t) * dinit;
++	double f0;
++	f0 = v0;
++	double f12 = 16807;
++	double f15 = 2147483647;
++	f12 = f0 * f12;
++	double v12;
++	v12 = fmod(f12, f15);
++	*dinit = v12;
+ }
+ 
+ static void calc_cak7_exponent(uint32_t *dinit, uint8_t *out, uint8_t len)
 diff --git a/readers.h b/readers.h
 index eec350e9..316c2bea 100644
 --- a/readers.h
