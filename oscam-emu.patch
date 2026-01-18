@@ -1,4 +1,5 @@
-patch version: oscam-emu-patch 2.26.01-11935-(573dab3e)
+patch version: oscam-emu-patch 2.26.01-11936-802-(e1a69473)
+patch date: 2026-01-18 15:46:03 UTC (+0000)
 patch modified by Levi45 (18/01/2026)
 
 diff --git a/CMakeLists.txt b/CMakeLists.txt
@@ -471,10 +472,10 @@ index 4cda2edd..6cd27dae 100644
  
  #endif
 diff --git a/globals.h b/globals.h
-index ec1f5ae3..ddb23c40 100644
+index 8560a1bb..1eea7235 100644
 --- a/globals.h
 +++ b/globals.h
-@@ -368,11 +368,11 @@
+@@ -368,9 +368,9 @@
  /* ===========================
   *			constants
   * =========================== */
@@ -484,10 +485,8 @@ index ec1f5ae3..ddb23c40 100644
 -#define BOARD_URL				"https://board.streamboard.tv"
 +#define BOARD_URL				"https://github.com/oscam-mirror/oscam-emu/discussions"
  #ifndef CS_VERSION
- #define CS_VERSION				"2.26.01-11935"
+ #define CS_VERSION				"2.26.01-11936"
  #endif
- #ifndef CS_GIT_COMMIT
- #define CS_GIT_COMMIT			"a2b4c6d8"
 @@ -407,14 +407,18 @@
  #define CS_ECM_RINGBUFFER_MAX	0x10	// max size for ECM last responsetimes ringbuffer. Keep this set to power of 2 values!
  
@@ -12332,52 +12331,6 @@ index 00000000..cf718779
 +++ b/webif/files/menu_softcamkey.html
 @@ -0,0 +1 @@
 +			<LI CLASS="##CMENUACTIVE30##"><A HREF="files.html?file=SoftCam.Key">SoftCam.Key</A></LI>
-diff --git a/webif/include/css.css b/webif/include/css.css
-index 407006dc..46b81ff1 100644
---- a/webif/include/css.css
-+++ b/webif/include/css.css
-@@ -583,22 +583,18 @@ div.footer {
- 	border-top:3px solid #CCC
- }
- div.footer .top_link {
-+	padding-left:12px;
- 	position:absolute;
-+	font-weight:bold;
- 	bottom:5px;
--	right:10px;
--	font-weight:bold
--}
--div.footer .top_link a:after {
--	content:" \25B2"
-+	left:7px;
-+	z-index:0
- }
--LI.bottom_link {
-+div.footer .top_link a:before {
-+	content:"▲";
-+	font-weight:normal;
- 	position:absolute;
--	top:6px;
--	right:10px;
--	font-weight:bold
--}
--LI.bottom_link a:after {
--	content:" \25BC"
-+	left:1px
- }
- div.footer li {
- 	margin:5px
-diff --git a/webif/include/menu.html b/webif/include/menu.html
-index 429be370..0a1c1d99 100644
---- a/webif/include/menu.html
-+++ b/webif/include/menu.html
-@@ -12,5 +12,4 @@
- 				<LI CLASS="##MENUACTIVE9##"><A HREF="script.html">Scripts</A></LI>
- 				<LI CLASS="##MENUACTIVE10##"><A HREF="shutdown.html">Restart</A></LI>
- 			</UL>
--			<LI CLASS="bottom_link"><A HREF="#statusfooter" TITLE="Bottom of Page">BOTTOM</A></LI>
- 		</DIV>
-\ No newline at end of file
 diff --git a/webif/pages_index.txt b/webif/pages_index.txt
 index fbf1d18b..654fc692 100644
 --- a/webif/pages_index.txt
