@@ -1,258 +1,11 @@
-patch by Levi45
-forom https://satellite-forum.com
----
-diff --git a/.github/workflows/build-oscam.yml b/.github/workflows/build-oscam.yml
-new file mode 100644
-index 00000000..fef78e2d
---- /dev/null
-+++ b/.github/workflows/build-oscam.yml
-@@ -0,0 +1,36 @@
-+name: build oscam-emu
-+
-+on:
-+  push:
-+    branches:
-+      - master
-+    paths-ignore:
-+      - '.github/**'
-+  pull_request:
-+    branches:
-+      - master
-+    paths-ignore:
-+      - '.github/**'
-+  workflow_dispatch:
-+
-+jobs:
-+  build:
-+    runs-on: ubuntu-latest
-+
-+    steps:
-+    - name: checkout master
-+      uses: actions/checkout@v4
-+
-+    - name: build libdvbcsa
-+      run: |
-+        git clone https://github.com/oe-mirrors/libdvbcsa.git
-+        cd libdvbcsa
-+        ./bootstrap
-+        ./configure --enable-avx2
-+        make
-+        sudo make install
-+
-+    - name: build oscam-emu
-+      run: |
-+        ./config.sh --enable all --disable WITH_SOFTCAM
-+        make
-diff --git a/.github/workflows/create-patch.yml b/.github/workflows/create-patch.yml
-new file mode 100644
-index 00000000..7e57425c
---- /dev/null
-+++ b/.github/workflows/create-patch.yml
-@@ -0,0 +1,41 @@
-+name: create patch
-+
-+on:
-+  push:
-+    branches:
-+      - master
-+    paths-ignore:
-+      - '.github/**'
-+  workflow_dispatch:
-+
-+jobs:
-+  create-patch:
-+    runs-on: ubuntu-latest
-+
-+    steps:
-+    - name: checkout master
-+      uses: actions/checkout@v4
-+      with:
-+        fetch-depth: 0
-+
-+    - name: checkout oscam-emu-patch
-+      uses: actions/checkout@v4
-+      with:
-+        repository: oscam-mirror/oscam-emu-patch
-+        token: ${{ secrets.ACTIONS_TOKEN }}
-+        path: emu
-+
-+    - name: create patch
-+      run: |
-+        git diff origin/oscam-gitlab -- > emu/oscam-emu.patch :^.github :^.gitlab
-+        sed -i "1s/^/patch version: $(./config.sh --oscam-version) ($(./config.sh --oscam-commit))\npatch date: $(date "+%Y-%m-%d %H:%M:%S %Z (%:z)")\n---\n/" emu/oscam-emu.patch
-+
-+    - name: commit oscam-emu.patch
-+      run: |
-+        cd emu
-+        git config --global user.name "oscam-emu-bot"
-+        git config --global user.email "187860193+oscam-emu-bot@users.noreply.github.com"
-+        if ! git diff --quiet HEAD; then
-+          git commit -am "Sync patch with $(../config.sh --oscam-version)"
-+          git push
-+        fi
-diff --git a/.github/workflows/lockdown-repo.yml b/.github/workflows/lockdown-repo.yml
-new file mode 100644
-index 00000000..366de7e9
---- /dev/null
-+++ b/.github/workflows/lockdown-repo.yml
-@@ -0,0 +1,28 @@
-+name: 'lockdown repo'
-+
-+on:
-+  issues:
-+    types: opened
-+  pull_request_target:
-+    types: opened
-+  workflow_dispatch:
-+
-+permissions:
-+  issues: write
-+  pull-requests: write
-+
-+jobs:
-+  lockdown:
-+    runs-on: ubuntu-latest
-+    steps:
-+      - uses: dessant/repo-lockdown@v4
-+        with:
-+          close-issue: true
-+          issue-comment: >
-+            This repository does not accept bug reports.
-+          skip-closed-issue-comment: true
-+          close-pr: true
-+          pr-comment: >
-+            This repository does not accept pull requests
-+            because further development has stopped.
-+          skip-closed-pr-comment: true
-diff --git a/.github/workflows/merge-gitlab.yml b/.github/workflows/merge-gitlab.yml
-new file mode 100644
-index 00000000..dabb8fe7
---- /dev/null
-+++ b/.github/workflows/merge-gitlab.yml
-@@ -0,0 +1,29 @@
-+name: merge gitlab
-+
-+on:
-+  workflow_call:
-+  workflow_dispatch:
-+
-+jobs:
-+  merge:
-+    runs-on: ubuntu-latest
-+
-+    steps:
-+    - uses: actions/checkout@v4
-+      with:
-+        fetch-depth: 0
-+        token: ${{ secrets.ACTIONS_TOKEN }}
-+
-+    - name: git config
-+      run: |
-+        git config --global user.name "oscam-emu-bot"
-+        git config --global user.email "187860193+oscam-emu-bot@users.noreply.github.com"
-+
-+    - name: merge oscam-gitlab into master
-+      run: |
-+        if git merge --no-ff origin/oscam-gitlab -m "Auto-Merge branch 'oscam-gitlab'"; then
-+            git push --follow-tags origin
-+        else
-+            printf "\nfiles with merge conficts:\n"
-+            git diff --check
-+        fi
-diff --git a/.github/workflows/sync-gitlab.yml b/.github/workflows/sync-gitlab.yml
-new file mode 100644
-index 00000000..5bfa93bd
---- /dev/null
-+++ b/.github/workflows/sync-gitlab.yml
-@@ -0,0 +1,43 @@
-+name: sync gitlab
-+
-+on:
-+  workflow_call:
-+  workflow_dispatch:
-+  repository_dispatch:
-+    types: invoke-sync-gitlab
-+
-+jobs:
-+  sync:
-+    runs-on: ubuntu-latest
-+
-+    steps:
-+    - name: checkout oscam-gitlab
-+      uses: actions/checkout@v4
-+      with:
-+        ref: oscam-gitlab
-+        fetch-depth: 0
-+        token: ${{ secrets.ACTIONS_TOKEN }}
-+
-+    - name: git config
-+      run: |
-+        git config --global user.name "oscam-emu-bot"
-+        git config --global user.email "187860193+oscam-emu-bot@users.noreply.github.com"
-+
-+    - name: sync oscam-gitlab with upstream
-+      run: |
-+        git remote add --track master mirror https://github.com/oscam-mirror/oscam.git
-+        git fetch mirror
-+        ahead=$(git rev-list mirror/master..HEAD --count)
-+        if [ $ahead -gt 0 ]; then
-+            force='--force'
-+            printf "\n$ahead commit(s) ahead upstream -> reset branch and force push changes\n"
-+            git reset --hard HEAD~$ahead
-+        fi
-+        git merge mirror/master
-+        git push --follow-tags origin $force
-+
-+  reuse:
-+    uses: ./.github/workflows/merge-gitlab.yml
-+    secrets: inherit
-+    needs:
-+      - sync
-diff --git a/.gitlab/oscam-helper.yml b/.gitlab/oscam-helper.yml
-index f3fef2a2..9e68f6ce 100644
---- a/.gitlab/oscam-helper.yml
-+++ b/.gitlab/oscam-helper.yml
-@@ -115,14 +115,9 @@
-   #installs download-secure-files for pipeline user
-   download-secure-files-installer:
-     - |
-+      echo "Installing gitlab download-secure-files binary...";
-       CI_API_V4_URL="${API_PROTOCOL}:${CI_API_V4_URL#*:}"
--      if [ ! -x $HOME/bin/download-secure-files ]; then
--        echo "Installing gitlab download-secure-files binary...";
--        curl --silent -L "https://gitlab.com/gitlab-org/incubation-engineering/mobile-devops/download-secure-files/-/raw/main/installer" | bash;
--      else
--        echo "download-secure-files already installed, skipping...";
--        $HOME/bin/download-secure-files;
--      fi;
-+      curl --silent -L "https://gitlab.com/gitlab-org/incubation-engineering/mobile-devops/download-secure-files/-/raw/main/installer" | bash;
- 
-   #checkout git repository parts (needs variables GIT_STRATEGY: none and e.g. GIT SPARSE_FILTER: .gitlab to be set in the calling job)
-   sparse-checkout:
+patch version: oscam-emu-patch 2.26.01-11935-(573dab3e)
+patch modified by Levi45 (18/01/2026)
+
 diff --git a/CMakeLists.txt b/CMakeLists.txt
-index 5a9c976d..b39bc25a 100644
+index c27d1cb1..b1f5b6d0 100644
 --- a/CMakeLists.txt
 +++ b/CMakeLists.txt
-@@ -53,8 +53,6 @@ if (CMAKE_CROSSCOMPILING)
- 		set (OSCamOperatingSystem "Padre")
- 	elseif (OSCAM_SYSTEM_NAME MATCHES "FriendlyARM")
- 		set (OSCamOperatingSystem "FriendlyARM")
--	elseif (OSCAM_SYSTEM_NAME MATCHES "Amsmc")
--		set (OSCamOperatingSystem "Amsmc")
- 	else (OSCAM_SYSTEM_NAME MATCHES "Tuxbox")
- 		message (STATUS "Unknown cross system name: <${CMAKE_SYSTEM_NAME}>")
- 		set (OSCamOperatingSystem "Unknown")
-@@ -195,9 +193,6 @@ elseif (OSCamOperatingSystem MATCHES "OpenBSD")
- 	set (DEFAULT_CS_CONFDIR "/etc/oscam")
- elseif (OSCamOperatingSystem MATCHES "FriendlyARM")
- 	set (DEFAULT_CS_CONFDIR ".")
--elseif (OSCamOperatingSystem MATCHES "Amsmc")
--	set (USE_AMSMC "USE_AMSMC")
--	add_definitions ("-DWITH_AMSMC=1")
- endif (OSCamOperatingSystem MATCHES "Linux")
- 
- set (CS_CONFDIR ${DEFAULT_CS_CONFDIR} CACHE STRING "Default path for the config files")
-@@ -539,6 +534,22 @@ endif (CONFIG_STREAMRELAY MATCHES "Y" AND NOT MODULE_STREAMRELAY EQUAL 1)
+@@ -546,6 +546,22 @@ endif (CONFIG_STREAMRELAY MATCHES "Y" AND NOT MODULE_STREAMRELAY EQUAL 1)
  # Manage config.h based on command line parameters
  # Manipulate config file based on given parameters and read unset parameters
  
@@ -275,40 +28,7 @@ index 5a9c976d..b39bc25a 100644
  execute_process (COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/config.sh --show-valid OUTPUT_VARIABLE config_vars_string OUTPUT_STRIP_TRAILING_WHITESPACE)
  string(REGEX MATCHALL "[A-Z0-9_]+" config_vars ${config_vars_string})
  
-@@ -559,7 +570,7 @@ GENERATE_OSCAM_CONFIG("${CMAKE_CURRENT_SOURCE_DIR}/config.h")
- # Build config.mak and related files
- # FIXME: Create USE_FLAGS and pass them to config.sh using --use-flags
- execute_process (COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/config.sh --objdir ${CMAKE_CURRENT_BINARY_DIR} --use-flags  "${USE_STAPI} ${USE_STAPI5} /
--${USE_COOLAPI} ${USE_SU980} ${USE_AZBOX} ${USE_AMSMC} ${USE_MCA} ${USE_SSL} ${USE_LIBCRYPTO} ${USE_LIBUSB} ${USE_PCSC} ${USE_COMPRESS_FLAG}" --make-config.mak)
-+${USE_COOLAPI} ${USE_SU980} ${USE_AZBOX} ${USE_MCA} ${USE_SSL} ${USE_LIBCRYPTO} ${USE_LIBUSB} ${USE_PCSC} ${USE_COMPRESS_FLAG}" --make-config.mak)
- # Generate webif/pages.c
- execute_process (COMMAND make --no-print-directory --quiet -C ${CMAKE_CURRENT_SOURCE_DIR}/webif clean)
- execute_process (COMMAND make --no-print-directory --quiet -C ${CMAKE_CURRENT_SOURCE_DIR}/webif)
-@@ -691,6 +702,12 @@ if (HAVE_LIBCRYPTO)
- 	target_link_libraries (${exe_name} "${OPENSSL_CRYPTO_LIBRARIES}")
- endif (HAVE_LIBCRYPTO)
- 
-+# some systems need libm for the nagra cak7 functions to work
-+check_include_file("math.h" HAVE_LIBM)
-+if(HAVE_LIBM)
-+	target_link_libraries (${exe_name} m)
-+endif(HAVE_LIBM)
-+
- if (HAVE_PCSC)
- if (NOT OSCamOperatingSystem MATCHES "Mac OS X")
- if (NOT OSCamOperatingSystem MATCHES "Windows/Cygwin")
-@@ -711,6 +728,10 @@ add_dependencies (${exe_name} ${csoscam} ${csreaders} ${csmodules})
- 
- #----------------------- specific options ------------------------------
- 
-+if (NOT OSCamOperatingSystem MATCHES "(Mac OS X|Windows/Cygwin|FreeBSD|OpenBSD)")
-+	target_link_libraries (${exe_name} rt)
-+endif (NOT OSCamOperatingSystem MATCHES "(Mac OS X|Windows/Cygwin|FreeBSD|OpenBSD)")
-+
- if (OSCamOperatingSystem MATCHES "Linux")
- 	set (dl_link "dl")
- elseif (OSCamOperatingSystem MATCHES "Mac OS X")
-@@ -874,6 +895,24 @@ endif( HAVE_LIBRT OR HAVE_LIBRT_STATIC)
+@@ -888,6 +904,24 @@ endif( HAVE_LIBRT OR HAVE_LIBRT_STATIC)
  
  #--------------------------------------------------------------------------------
  
@@ -333,7 +53,7 @@ index 5a9c976d..b39bc25a 100644
  #----------------------- installation -----------------------------
  
  file (GLOB config_files "${CMAKE_CURRENT_SOURCE_DIR}/Distribution/oscam.*")
-@@ -986,4 +1025,11 @@ if (HAVE_LIBDVBCSA)
+@@ -1000,4 +1034,11 @@ if (HAVE_LIBDVBCSA)
  	endif(STATICLIBDVBCSA AND NOT LIBDVBCSADIR)
  endif (HAVE_LIBDVBCSA)
  
@@ -394,7 +114,7 @@ index 3d333a93..08b173ed 100644
  	  1 = send keepalive messages to keep connection to remote CCCam server up, default:0
  
 diff --git a/Makefile b/Makefile
-index ea47c289..a95e2c04 100644
+index e9970a90..21e4a1d6 100644
 --- a/Makefile
 +++ b/Makefile
 @@ -32,6 +32,9 @@ ifeq "$(shell ./config.sh --enabled WITH_SSL)" "Y"
@@ -407,59 +127,7 @@ index ea47c289..a95e2c04 100644
  ifdef USE_SSL
  	override USE_LIBCRYPTO=1
  endif
-@@ -41,6 +44,12 @@ CONF_DIR = /usr/local/etc
- LIB_PTHREAD = -lpthread
- LIB_DL = -ldl
- 
-+LIB_RT :=
-+ifeq ($(uname_S),Linux)
-+	ifeq "$(shell ./config.sh --enabled CLOCKFIX)" "Y"
-+		LIB_RT := -lrt
-+	endif
-+endif
- ifeq ($(uname_S),FreeBSD)
- 	LIB_DL :=
- endif
-@@ -54,7 +63,7 @@ ifeq "$(shell ./config.sh --enabled MODULE_STREAMRELAY)" "Y"
- 	endif
- endif
- 
--override STD_LIBS := $(LIB_PTHREAD) $(LIB_DL)
-+override STD_LIBS := -lm $(LIB_PTHREAD) $(LIB_DL) $(LIB_RT)
- override STD_DEFS := -D'CS_VERSION="$(VER)"'
- override STD_DEFS += -D'CS_GIT_COMMIT="$(GIT_SHA)"'
- override STD_DEFS += -D'CS_BUILD_DATE="$(BUILD_DATE)"'
-@@ -186,8 +195,11 @@ DEFAULT_AZBOX_LIB = -Lextapi/openxcas -lOpenXCASAPI
- DEFAULT_LIBCRYPTO_LIB = -lcrypto
- DEFAULT_SSL_LIB = -lssl
- DEFAULT_LIBDVBCSA_LIB = -ldvbcsa
--DEFAULT_LIBUSB_LIB = -lusb-1.0
--
-+ifeq ($(uname_S),Linux)
-+	DEFAULT_LIBUSB_LIB = -lusb-1.0 -lrt
-+else
-+	DEFAULT_LIBUSB_LIB = -lusb-1.0
-+endif
- # Since FreeBSD 8 (released in 2010) they are using their own
- # libusb that is API compatible to libusb but with different soname
- ifeq ($(uname_S),FreeBSD)
-@@ -253,7 +265,6 @@ $(eval $(call prepare_use_flags,COOLAPI,coolapi))
- $(eval $(call prepare_use_flags,COOLAPI2,coolapi2))
- $(eval $(call prepare_use_flags,SU980,su980))
- $(eval $(call prepare_use_flags,AZBOX,azbox))
--$(eval $(call prepare_use_flags,AMSMC,amsmc))
- $(eval $(call prepare_use_flags,MCA,mca))
- $(eval $(call prepare_use_flags,SSL,ssl))
- $(eval $(call prepare_use_flags,LIBCRYPTO,))
-@@ -357,7 +368,6 @@ SRC-$(CONFIG_CARDREADER_SMART) += csctapi/ifd_smartreader.c
- SRC-$(CONFIG_CARDREADER_STINGER) += csctapi/ifd_stinger.c
- SRC-$(CONFIG_CARDREADER_STAPI) += csctapi/ifd_stapi.c
- SRC-$(CONFIG_CARDREADER_STAPI5) += csctapi/ifd_stapi.c
--SRC-$(CONFIG_CARDREADER_INTERNAL_AMSMC) += csctapi/ifd_amsmc.c
- 
- SRC-$(CONFIG_LIB_MINILZO) += minilzo/minilzo.c
- 
-@@ -370,6 +380,32 @@ SRC-$(CONFIG_CS_CACHEEX) += module-cccam-cacheex.c
+@@ -371,6 +374,32 @@ SRC-$(CONFIG_CS_CACHEEX) += module-cccam-cacheex.c
  SRC-$(CONFIG_MODULE_CCCAM) += module-cccam.c
  SRC-$(CONFIG_MODULE_CCCSHARE) += module-cccshare.c
  SRC-$(CONFIG_MODULE_CONSTCW) += module-constcw.c
@@ -492,27 +160,6 @@ index ea47c289..a95e2c04 100644
  SRC-$(CONFIG_CS_CACHEEX) += module-csp.c
  SRC-$(CONFIG_CW_CYCLE_CHECK) += module-cw-cycle-check.c
  SRC-$(CONFIG_WITH_AZBOX) += module-dvbapi-azbox.c
-@@ -755,11 +791,6 @@ OSCam build system documentation\n\
-                      Using USE_AZBOX=1 adds to '-azbox' to PLUS_TARGET.\n\
-                      extapi/openxcas/libOpenXCASAPI.a library that is shipped\n\
-                      with OSCam is compiled for MIPSEL.\n\
--\n\
--   USE_AMSMC=1     - Request support for Amlogic SMC internal smartcard reader.\n\
--                     Using USE_AMSMC=1 adds '-amsmc' to PLUS_TARGET.\n\
--                     This enables support for the internal smartcard slot\n\
--                     on set-top boxes using the Amlogic SMC driver (/dev/smc0).\n\
- \n\
-    USE_MCA=1      - Request support for Matrix Cam Air (MCA).\n\
-                     The variables that control the build are:\n\
-@@ -899,8 +930,6 @@ OSCam build system documentation\n\
-      make CROSS=arm-pnx8400-linux-uclibcgnueabi- USE_COOLAPI2=1\n\n\
-    Build OSCam for MIPSEL with AZBOX support:\n\
-      make CROSS=mipsel-linux-uclibc- USE_AZBOX=1\n\n\
--   Build OSCam for ARM with Amlogic SMC internal reader support:\n\
--     make CROSS=aarch64-linux-gnu- USE_AMSMC=1\n\n\
-    Build OSCam for ARM with MCA support:\n\
-      make CROSS=arm-none-linux-gnueabi- USE_MCA=1\n\n\
-    Build OSCam with libusb and PCSC:\n\
 diff --git a/README.config b/README.config
 index 03c70f7d..9b99c3c4 100644
 --- a/README.config
@@ -699,7 +346,7 @@ index d47df457..5d514452 100644
 +Configuration wiki:
 +   https://wiki.streamboard.tv/wiki/OSCam/de/Config/oscam.conf
 diff --git a/config.h b/config.h
-index 7b4f4473..1139180d 100644
+index 06b18eec..47afd658 100644
 --- a/config.h
 +++ b/config.h
 @@ -1,6 +1,8 @@
@@ -711,7 +358,7 @@ index 7b4f4473..1139180d 100644
  #define WEBIF 1
  #define WEBIF_LIVELOG 1
  #define WEBIF_JQUERY 1
-@@ -8,7 +10,7 @@
+@@ -9,7 +11,7 @@
  //#define WITH_SSL 1
  #if defined(__linux__) || defined(__CYGWIN__)
  #define HAVE_DVBAPI 1
@@ -720,37 +367,19 @@ index 7b4f4473..1139180d 100644
  #endif
  //#define WITH_NEUTRINO 1
  #define READ_SDT_CHARSETS 1
-@@ -76,7 +78,7 @@
- #define CARDREADER_SMART 1
- #endif
- 
--// CARDREADER_INTERNAL_{AZBOX,COOLAPI,AMSMC,SCI} are internal variables
-+// CARDREADER_INTERNAL_{AZBOX,COOLAPI,SCI} are internal variables
- // do not touch them
- #if (defined(CARDREADER_INTERNAL) && defined(WITH_AZBOX))
- #define CARDREADER_INTERNAL_AZBOX 1
-@@ -84,8 +86,6 @@
- #define CARDREADER_INTERNAL_COOLAPI 1
- #elif defined(CARDREADER_INTERNAL) && defined(WITH_COOLAPI2)
- #define CARDREADER_INTERNAL_COOLAPI2 1
--#elif defined(CARDREADER_INTERNAL) && defined(WITH_AMSMC)
--#define CARDREADER_INTERNAL_AMSMC 1
- #elif defined(CARDREADER_INTERNAL)
- #define CARDREADER_INTERNAL_SCI 1
- #endif
 diff --git a/config.sh b/config.sh
-index bc2a882c..2ad37fc0 100755
+index 2ed76a79..d0d132c3 100755
 --- a/config.sh
 +++ b/config.sh
 @@ -1,6 +1,6 @@
  #!/bin/sh
  
--addons="WEBIF WEBIF_LIVELOG WEBIF_JQUERY WITH_COMPRESS_WEBIF WITH_SSL HAVE_DVBAPI WITH_EXTENDED_CW WITH_NEUTRINO READ_SDT_CHARSETS CS_ANTICASC WITH_DEBUG MODULE_MONITOR WITH_LB CS_CACHEEX CS_CACHEEX_AIO CW_CYCLE_CHECK LCDSUPPORT LEDSUPPORT CLOCKFIX IPV6SUPPORT WITH_ARM_NEON WITH_SIGNING"
-+addons="WEBIF WEBIF_LIVELOG WEBIF_JQUERY WITH_COMPRESS_WEBIF WITH_SSL HAVE_DVBAPI WITH_EXTENDED_CW WITH_NEUTRINO READ_SDT_CHARSETS CS_ANTICASC WITH_DEBUG MODULE_MONITOR WITH_LB CS_CACHEEX CS_CACHEEX_AIO CW_CYCLE_CHECK LCDSUPPORT LEDSUPPORT CLOCKFIX IPV6SUPPORT WITH_ARM_NEON WITH_SIGNING WITH_EMU WITH_SOFTCAM"
+-addons="WEBIF WEBIF_LIVELOG WEBIF_JQUERY WEBIF_WIKI WITH_COMPRESS_WEBIF WITH_SSL HAVE_DVBAPI WITH_EXTENDED_CW WITH_NEUTRINO READ_SDT_CHARSETS CS_ANTICASC WITH_DEBUG MODULE_MONITOR WITH_LB CS_CACHEEX CS_CACHEEX_AIO CW_CYCLE_CHECK LCDSUPPORT LEDSUPPORT CLOCKFIX IPV6SUPPORT WITH_ARM_NEON WITH_SIGNING"
++addons="WEBIF WEBIF_LIVELOG WEBIF_JQUERY WEBIF_WIKI WITH_COMPRESS_WEBIF WITH_SSL HAVE_DVBAPI WITH_EXTENDED_CW WITH_NEUTRINO READ_SDT_CHARSETS CS_ANTICASC WITH_DEBUG MODULE_MONITOR WITH_LB CS_CACHEEX CS_CACHEEX_AIO CW_CYCLE_CHECK LCDSUPPORT LEDSUPPORT CLOCKFIX IPV6SUPPORT WITH_ARM_NEON WITH_SIGNING WITH_EMU WITH_SOFTCAM"
  protocols="MODULE_CAMD33 MODULE_CAMD35 MODULE_CAMD35_TCP MODULE_NEWCAMD MODULE_CCCAM MODULE_CCCSHARE MODULE_GBOX MODULE_RADEGAST MODULE_SCAM MODULE_SERIAL MODULE_CONSTCW MODULE_PANDORA MODULE_GHTTP MODULE_STREAMRELAY"
  readers="READER_NAGRA READER_NAGRA_MERLIN READER_IRDETO READER_CONAX READER_CRYPTOWORKS READER_SECA READER_VIACCESS READER_VIDEOGUARD READER_DRE READER_TONGFANG READER_BULCRYPT READER_GRIFFIN READER_DGCRYPT"
  card_readers="CARDREADER_PHOENIX CARDREADER_INTERNAL CARDREADER_SC8IN1 CARDREADER_MP35 CARDREADER_SMARGO CARDREADER_DB2COM CARDREADER_STAPI CARDREADER_STAPI5 CARDREADER_STINGER CARDREADER_DRECAS"
-@@ -12,7 +12,7 @@ CONFIG_WEBIF_JQUERY=y
+@@ -13,7 +13,7 @@ CONFIG_WEBIF_JQUERY=y
  CONFIG_WITH_COMPRESS_WEBIF=y
  # CONFIG_WITH_SSL=n
  CONFIG_HAVE_DVBAPI=y
@@ -759,7 +388,7 @@ index bc2a882c..2ad37fc0 100755
  # CONFIG_WITH_NEUTRINO=n
  CONFIG_READ_SDT_CHARSETS=y
  # CONFIG_CS_ANTICASC=n
-@@ -28,6 +28,8 @@ CONFIG_WITH_LB=y
+@@ -29,6 +29,8 @@ CONFIG_WITH_LB=y
  # CONFIG_IPV6SUPPORT=n
  # CONFIG_WITH_ARM_NEON=n
  # CONFIG_WITH_SIGNING=n
@@ -768,7 +397,7 @@ index bc2a882c..2ad37fc0 100755
  # CONFIG_MODULE_CAMD33=n
  CONFIG_MODULE_CAMD35=y
  CONFIG_MODULE_CAMD35_TCP=y
-@@ -328,14 +330,17 @@ get_opts() {
+@@ -329,8 +331,8 @@ get_opts() {
  
  update_deps() {
  	# Calculate dependencies
@@ -778,7 +407,8 @@ index bc2a882c..2ad37fc0 100755
 +	disabled_all $(get_opts readers) $(get_opts card_readers) WITH_EMU && disable_opt WITH_CARDREADER >/dev/null
  	disabled WEBIF && disable_opt WEBIF_LIVELOG >/dev/null
  	disabled WEBIF && disable_opt WEBIF_JQUERY >/dev/null
- 	enabled MODULE_CCCSHARE && enable_opt MODULE_CCCAM >/dev/null
+ 	disabled WEBIF && disable_opt WEBIF_WIKI >/dev/null
+@@ -339,6 +341,9 @@ update_deps() {
  	enabled_any CARDREADER_DB2COM CARDREADER_MP35 CARDREADER_SC8IN1 CARDREADER_STINGER && enable_opt CARDREADER_PHOENIX >/dev/null
  	enabled CS_CACHEEX_AIO && enable_opt CS_CACHEEX >/dev/null
  	enabled WITH_SIGNING && enable_opt WITH_SSL >/dev/null
@@ -788,25 +418,7 @@ index bc2a882c..2ad37fc0 100755
  }
  
  list_config() {
-@@ -347,7 +352,6 @@ list_config() {
- 	have_flag USE_COOLAPI2 && echo "CONFIG_WITH_COOLAPI2=y" || echo "# CONFIG_WITH_COOLAPI2=n"
- 	have_flag USE_SU980 && echo "CONFIG_WITH_SU980=y" || echo "# CONFIG_WITH_SU980=n"
- 	have_flag USE_AZBOX && echo "CONFIG_WITH_AZBOX=y" || echo "# CONFIG_WITH_AZBOX=n"
--	have_flag USE_AMSMC && echo "CONFIG_WITH_AMSMC=y" || echo "# CONFIG_WITH_AMSMC=n"
- 	have_flag USE_MCA && echo "CONFIG_WITH_MCA=y" || echo "# CONFIG_WITH_MCA=n"
- 	have_flag USE_LIBCRYPTO && echo "CONFIG_WITH_LIBCRYPTO=y" || echo "# CONFIG_WITH_LIBCRYPTO=n"
- 	for OPT in $addons $protocols WITH_CARDREADER $readers
-@@ -362,8 +366,7 @@ list_config() {
- 			enabled $OPT && have_flag USE_AZBOX && echo "CONFIG_${OPT}_AZBOX=y" || echo "# CONFIG_${OPT}_AZBOX=n"
- 			enabled $OPT && have_any_flags USE_COOLAPI USE_SU980 && echo "CONFIG_${OPT}_COOLAPI=y" || echo "# CONFIG_${OPT}_COOLAPI=n"
- 			enabled $OPT && have_flag USE_COOLAPI2 && echo "CONFIG_${OPT}_COOLAPI2=y" || echo "# CONFIG_${OPT}_COOLAPI2=n"
--			enabled $OPT && have_flag USE_AMSMC && echo "CONFIG_${OPT}_AMSMC=y" || echo "# CONFIG_${OPT}_AMSMC=n"
--			enabled $OPT && not_have_all_flags USE_AZBOX USE_COOLAPI USE_COOLAPI2 USE_SU980 USE_AMSMC && echo "CONFIG_${OPT}_SCI=y" || echo "# CONFIG_${OPT}_SCI=n"
-+			enabled $OPT && not_have_all_flags USE_AZBOX USE_COOLAPI USE_COOLAPI2 USE_SU980 && echo "CONFIG_${OPT}_SCI=y" || echo "# CONFIG_${OPT}_SCI=n"
- 			continue
- 		fi
- 		if [ $OPT = CARDREADER_STAPI ]
-@@ -387,9 +390,9 @@ list_config() {
+@@ -390,9 +395,9 @@ list_config() {
  	not_have_flag USE_LIBCRYPTO && echo "CONFIG_LIB_AES=y" || echo "# CONFIG_LIB_AES=n"
  	enabled MODULE_CCCAM && echo "CONFIG_LIB_RC6=y" || echo "# CONFIG_LIB_RC6=n"
  	not_have_flag USE_LIBCRYPTO && enabled MODULE_CCCAM && echo "CONFIG_LIB_SHA1=y" || echo "# CONFIG_LIB_SHA1=n"
@@ -819,7 +431,7 @@ index bc2a882c..2ad37fc0 100755
  	enabled READER_NAGRA_MERLIN && echo "CONFIG_LIB_MDC2=y" || echo "# CONFIG_LIB_MDC2=n"
  	enabled READER_NAGRA_MERLIN && echo "CONFIG_LIB_FAST_AES=y" || echo "# CONFIG_LIB_FAST_AES=n"
  	enabled_any READER_NAGRA_MERLIN WITH_SIGNING && echo "CONFIG_LIB_SHA256=y" || echo "# CONFIG_LIB_SHA256=n"
-@@ -517,6 +520,8 @@ menu_addons() {
+@@ -522,6 +527,8 @@ menu_addons() {
  		IPV6SUPPORT			"IPv6 support (experimental)"					$(check_test "IPV6SUPPORT") \
  		WITH_ARM_NEON		"ARM NEON (SIMD/MPE) support"					$(check_test "WITH_ARM_NEON") \
  		WITH_SIGNING		"Binary signing with X.509 certificate"			$(check_test "WITH_SIGNING") \
@@ -828,13 +440,17 @@ index bc2a882c..2ad37fc0 100755
  		2> ${tempfile}
  
  	opt=${?}
-@@ -899,11 +904,12 @@ do
+@@ -904,7 +911,8 @@ do
  	;;
  	'-v'|'--oscam-version')
  		version=`grep '^#define CS_VERSION' globals.h | cut -d\" -f2`
 -		echo $version
 +		emuversion=`grep EMU_VERSION module-emulator-osemu.h | awk '{ print $3 }'`
 +		echo $version-$emuversion
+ 		break
+ 	;;
+ 	'--submodule')
+@@ -955,7 +963,7 @@ do
  		break
  	;;
  	'-c'|'--oscam-commit')
@@ -844,227 +460,20 @@ index bc2a882c..2ad37fc0 100755
  		break
  	;;
 diff --git a/csctapi/cardreaders.h b/csctapi/cardreaders.h
-index 4cda2edd..35f38c6c 100644
+index 4cda2edd..6cd27dae 100644
 --- a/csctapi/cardreaders.h
 +++ b/csctapi/cardreaders.h
-@@ -5,7 +5,6 @@ extern const struct s_cardreader cardreader_db2com;
- extern const struct s_cardreader cardreader_internal_sci;
- extern const struct s_cardreader cardreader_internal_cool;
- extern const struct s_cardreader cardreader_internal_azbox;
--extern const struct s_cardreader cardreader_internal_amsmc;
- extern const struct s_cardreader cardreader_mp35;
- extern const struct s_cardreader cardreader_mouse;
- extern const struct s_cardreader cardreader_pcsc;
-@@ -15,5 +14,6 @@ extern const struct s_cardreader cardreader_smartreader;
+@@ -15,5 +15,6 @@ extern const struct s_cardreader cardreader_smartreader;
  extern const struct s_cardreader cardreader_stapi;
  extern const struct s_cardreader cardreader_stinger;
  extern const struct s_cardreader cardreader_drecas;
 +extern const struct s_cardreader cardreader_emu;
  
  #endif
-diff --git a/csctapi/ifd_amsmc.c b/csctapi/ifd_amsmc.c
-deleted file mode 100644
-index 38262231..00000000
---- a/csctapi/ifd_amsmc.c
-+++ /dev/null
-@@ -1,92 +0,0 @@
--/*
--        ifd_amsmc.c
--        This module provides IFD handling functions for Amlogic SMC internal reader.
--*/
--
--#include "../globals.h"
--
--#ifdef CARDREADER_INTERNAL_AMSMC
--
--#include <linux/types.h>
--
--#include "atr.h"
--#include "io_serial.h"
--
--#define AMSMC_MAX_ATR_LEN    33
--
--struct am_smc_atr
--{
--	unsigned char atr[AMSMC_MAX_ATR_LEN];
--	int atr_len;
--};
--
--#define AMSMC_IOC_MAGIC 'C'
--#define AMSMC_IOC_RESET _IOR(AMSMC_IOC_MAGIC, 0x00, struct am_smc_atr)
--#define AMSMC_IOC_GET_STATUS _IOR(AMSMC_IOC_MAGIC, 0x01, int)
--
--#define OK    0
--#define ERROR 1
--
--static int32_t Amsmc_GetStatus(struct s_reader *reader, int32_t *status)
--{
--	call(ioctl(reader->handle, AMSMC_IOC_GET_STATUS, status) < 0);
--	return OK;
--}
--
--static int32_t Amsmc_Activate(struct s_reader *reader, ATR *atr)
--{
--	struct am_smc_atr smc_atr;
--	if(ioctl(reader->handle, AMSMC_IOC_RESET, &smc_atr) < 0)
--	{
--		rdr_log(reader, "Error: %s ioctl(AMSMC_IOC_RESET) failed. (%d:%s)", __func__, errno, strerror(errno));
--		return ERROR;
--	}
--	if(ATR_InitFromArray(atr, smc_atr.atr, smc_atr.atr_len) == ERROR)
--	{
--		rdr_log(reader, "WARNING: ATR is invalid!");
--		return ERROR;
--	}
--	return OK;
--}
--
--static int32_t Amsmc_Init(struct s_reader *reader)
--{
--	const int flags = O_RDWR | O_NOCTTY;
--	reader->handle = open(reader->device, flags);
--	if(reader->handle < 0)
--	{
--		rdr_log(reader, "ERROR: Opening device %s (errno=%d %s)", reader->device, errno, strerror(errno));
--		return ERROR;
--	}
--	return OK;
--}
--
--static int32_t Amsmc_Close(struct s_reader *reader)
--{
--	rdr_log_dbg(reader, D_DEVICE, "Closing AMSMC device %s", reader->device);
--	if(reader->handle >= 0)
--	{
--		if(close(reader->handle) != 0)
--		{
--			return ERROR;
--		}
--		reader->handle = -1;
--	}
--	return OK;
--}
--
--const struct s_cardreader cardreader_internal_amsmc =
--{
--	.desc            = "internal",
--	.typ             = R_INTERNAL,
--	.flush           = 1,
--	.max_clock_speed = 1,
--	.reader_init     = Amsmc_Init,
--	.get_status      = Amsmc_GetStatus,
--	.activate        = Amsmc_Activate,
--	.transmit        = IO_Serial_Transmit,
--	.receive         = IO_Serial_Receive,
--	.close           = Amsmc_Close,
--};
--
--#endif
-diff --git a/csctapi/ifd_azbox.c b/csctapi/ifd_azbox.c
-index 70872ef7..5703dd71 100644
---- a/csctapi/ifd_azbox.c
-+++ b/csctapi/ifd_azbox.c
-@@ -85,6 +85,9 @@ static int32_t Azbox_Reset(struct s_reader *reader, ATR *atr)
- 
-         rdr_log_dbg(reader, D_IFD, "Waiting for card ATR Response...");
- 
-+        int32_t ret = 0;
-+        while(ret);
-+
-         int32_t FI = (buf[n] >> 4);
- 
- 	int32_t Fi = atr_f_table[FI];
-@@ -106,7 +109,9 @@ static int32_t Azbox_Reset(struct s_reader *reader, ATR *atr)
-         rdr_log_dbg(reader, D_IFD, "ATR Fsmax is %.2f MHz, Work ETU is %.2f us, clocking card to %.2f MHz",
- 			                fmax / 1000000, (double)((double)(1 / (double)D) * ((double)Fi / (double)((double)frequency / 1000000))), (float) frequency / 1000000);
- 
--	if(ATR_InitFromArray(atr, buf, n) == ERROR)
-+        ret = ATR_InitFromArray(atr, buf, n);
-+
-+	if(ret == ERROR)
- 	{
- 		rdr_log(reader, "WARNING: ATR is invalid!");
- 		return ERROR;
-diff --git a/csctapi/ifd_sci.c b/csctapi/ifd_sci.c
-index 303cd685..d414e347 100644
---- a/csctapi/ifd_sci.c
-+++ b/csctapi/ifd_sci.c
-@@ -345,19 +345,21 @@ static int32_t Sci_Reset(struct s_reader *reader, ATR *atr)
- 			{
- 				Sci_Deactivate(reader);
- 				Sci_Activate(reader);
--				tries++; // increase fs
- 				if (reader->cardmhz > 2000 && reader->cardmhz != 8300)
- 				{
-+					tries++; // increase fs
- 					params.fs = (pll_start_fs - tries); // if 1 Mhz init failed retry with min 300 Mhz up to max 9.0 Mhz
- 					rdr_log(reader, "Read ATR fail, attempt %d/%d  fs = %d", tries, max_tries, params.fs);
- 				}
--				else if (reader->cardmhz == 8300)
-+				else if (reader->cardmhz > 2000 && reader->cardmhz == 8300)
- 				{
-+					tries++; // increase fs
- 					params.fs = (11 - tries); // if 1 Mhz init failed retry with 3.19 Mhz up to 5.188 Mhz
- 					rdr_log(reader, "Read ATR fail, attempt %d/5  fs = %d", tries, params.fs);
- 				}
- 				else
- 				{
-+					tries++; // increase fs
- 					params.fs = (2 + tries); // if 1 Mhz init failed retry with 3.0 Mhz up to 7.0 Mhz
- 					rdr_log(reader, "Read ATR fail, attempt %d/5  fs = %d", tries, params.fs);
- 				}
-@@ -487,6 +489,7 @@ static int32_t Sci_Init(struct s_reader *reader)
- 	int flags = O_RDWR | O_NOCTTY;
- #if defined(__SH4__) || defined(STB04SCI)
- 	flags |= O_NONBLOCK;
-+	reader->sh4_stb = 1;
- #endif
- 	reader->handle = open(reader->device, flags);
- 	if(reader->handle < 0)
-diff --git a/csctapi/ifd_stinger.c b/csctapi/ifd_stinger.c
-index a4883f5d..47928a3b 100644
---- a/csctapi/ifd_stinger.c
-+++ b/csctapi/ifd_stinger.c
-@@ -339,7 +339,10 @@ static int32_t stinger_mouse_init(struct s_reader *reader)
- 	}
- 
- 	clock_mhz = reader->mhz;
--	reader->mhz = reader->cardmhz;
-+
-+	if(reader->mhz != reader->cardmhz)
-+		{ reader->mhz = reader->cardmhz; }
-+
- 
- 	reader->handle = open(reader->device,  O_RDWR | O_NOCTTY | O_NONBLOCK);
- 	if(reader->handle < 0)
-diff --git a/extapi/coolapi.h b/extapi/coolapi.h
-index 2b26ae33..7fb1d7ca 100644
---- a/extapi/coolapi.h
-+++ b/extapi/coolapi.h
-@@ -223,8 +223,8 @@ do { \
- 			__LINE__ , \
- 			label, \
- 			ret, \
--			ret >= CNXT_STATUS_ERRORS ? "UNKNOWN" : "CNXT_STATUS_", \
--			ret >= CNXT_STATUS_ERRORS ? ""        : cnxt_status[ret] \
-+			ret > CNXT_STATUS_ERRORS ? "UNKNOWN" : "CNXT_STATUS_", \
-+			ret > CNXT_STATUS_ERRORS ? ""        : cnxt_status[ret] \
- 		); \
- 	} \
- } while(0)
 diff --git a/globals.h b/globals.h
-index 0aaad84b..9835ffec 100644
+index ec1f5ae3..ddb23c40 100644
 --- a/globals.h
 +++ b/globals.h
-@@ -234,7 +234,7 @@
- #endif
- 
- // checking if (X) free(X) unneccessary since freeing a null pointer doesnt do anything
--#define NULLFREE(X) {void *tmpX=X; X=NULL; free(tmpX); }
-+#define NULLFREE(X) {if (X) {void *tmpX=X; X=NULL; free(tmpX); }}
- 
- #ifdef __CYGWIN__
- #define cs_recv(a,b,c,d) cygwin_recv(a,b,c,d)
 @@ -368,11 +368,11 @@
  /* ===========================
   *			constants
@@ -1075,19 +484,11 @@ index 0aaad84b..9835ffec 100644
 -#define BOARD_URL				"https://board.streamboard.tv"
 +#define BOARD_URL				"https://github.com/oscam-mirror/oscam-emu/discussions"
  #ifndef CS_VERSION
- #define CS_VERSION				"2.26.01-11926"
+ #define CS_VERSION				"2.26.01-11935"
  #endif
  #ifndef CS_GIT_COMMIT
  #define CS_GIT_COMMIT			"a2b4c6d8"
-@@ -380,7 +380,6 @@
- #ifdef CS_CACHEEX
- #ifdef CS_CACHEEX_AIO
- #define CS_AIO_VERSION			CS_VERSION
--#define CS_AIO_VERSION_LEN		(sizeof(CS_AIO_VERSION))
- #endif
- #endif
- #ifndef CS_TARGET
-@@ -407,14 +406,18 @@
+@@ -407,14 +407,18 @@
  #define CS_ECM_RINGBUFFER_MAX	0x10	// max size for ECM last responsetimes ringbuffer. Keep this set to power of 2 values!
  
  // Support for multiple CWs per channel and other encryption algos
@@ -1107,7 +508,7 @@ index 0aaad84b..9835ffec 100644
  #define MSGLOGSIZE				64		// size of string buffer for a ecm to return messages
  
  #define D_TRACE					0x0001	// Generate very detailed error/trace messages per routine
-@@ -453,6 +456,7 @@
+@@ -453,6 +457,7 @@
  #define R_SMART					0x7		// Smartreader+
  #define R_PCSC					0x8		// PCSC
  #define R_DRECAS				0x9		// Reader DRECAS
@@ -1115,7 +516,7 @@ index 0aaad84b..9835ffec 100644
  /////// proxy readers after R_CS378X
  #define R_CAMD35				0x20	// Reader cascading camd 3.5x
  #define R_CAMD33				0x21	// Reader cascading camd 3.3x
-@@ -890,6 +894,13 @@ typedef struct s_entitlement						// contains entitlement Info
+@@ -890,6 +895,13 @@ typedef struct s_entitlement						// contains entitlement Info
  	uint32_t		class;							// the class needed for some systems
  	time_t			start;							// startdate
  	time_t			end;							// enddate
@@ -1129,22 +530,7 @@ index 0aaad84b..9835ffec 100644
  } S_ENTITLEMENT;
  
  struct s_client;
-@@ -1509,7 +1520,7 @@ typedef struct ce_csp_t
- 	uint8_t			lg_only_remote_settings;
- 	int32_t			feature_bitfield;
- 	CAIDVALUETAB	cacheex_nopushafter_tab;
--	char			aio_version[CS_AIO_VERSION_LEN];
-+	char			aio_version[12];
- #endif
- } CECSP;
- 
-@@ -1750,11 +1761,13 @@ struct s_reader										// contains device info, reader info and card info
- 	int8_t			ncd_disable_server_filt;
- 	int8_t			ncd_proto;
- 	int8_t			currenthops;					// number of hops (cccam & gbox)
-+	int8_t			sh4_stb;						// to set sh4 type box used to identify sci type.
- #ifdef MODULE_CCCAM
- 	char			cc_version[7];					// cccam version
+@@ -1771,6 +1783,7 @@ struct s_reader										// contains device info, reader info and card info
  	char			cc_build[7];					// cccam build number
  	int8_t			cc_maxhops;						// cccam max distance
  	int8_t			cc_mindown;						// cccam min downhops
@@ -1152,19 +538,19 @@ index 0aaad84b..9835ffec 100644
  	uint32_t		cc_id;
  	int8_t			cc_keepalive;
  	int8_t			cc_hop;							// For non-cccam reader: hop for virtual cards
-@@ -1935,6 +1948,11 @@ struct s_reader										// contains device info, reader info and card info
- #endif
+@@ -1959,6 +1972,11 @@ struct s_reader										// contains device info, reader info and card info
  #ifdef MODULE_GHTTP
  	uint8_t			ghttp_use_ssl;
-+#endif
+ #endif
 +#ifdef WITH_EMU
 +	FTAB			emu_auproviders;				// AU providers for Emu reader
 +	int8_t			emu_datecodedenabled;			// date-coded keys for BISS
 +	LLIST			*ll_biss2_rsa_keys;				// BISS2 RSA keys - Read from external PEM files
- #endif
++#endif
+ #ifdef READER_CONAX
  	uint8_t			cnxlastecm;						// == 0 - last ecm has not been paired ecm, > 0 last ecm has been paired ecm
- 	LLIST			*emmstat;						// emm stats
-@@ -2469,6 +2487,10 @@ struct s_config
+ #endif
+@@ -2494,6 +2512,10 @@ struct s_config
  #else
  #define DEFAULT_STREAM_SOURCE_PORT 8001 //Enigma2
  #endif
@@ -1175,7 +561,7 @@ index 0aaad84b..9835ffec 100644
  #endif
  
  	int32_t			max_cache_time;					// seconds ecms are stored in ecmcwcache
-@@ -2654,12 +2676,18 @@ bool boxtype_is(const char *boxtype);
+@@ -2679,12 +2701,18 @@ bool boxtype_is(const char *boxtype);
  bool boxname_is(const char *boxname);
  const char *boxtype_get(void);
  const char *boxname_get(void);
@@ -1194,7 +580,7 @@ index 0aaad84b..9835ffec 100644
  static inline bool caid_is_betacrypt(uint16_t caid) { return caid >> 8 == 0x17; }
  static inline bool caid_is_nagra(uint16_t caid) { return caid >> 8 == 0x18; }
  static inline bool caid_is_bulcrypt(uint16_t caid) { return caid == 0x5581 || caid == 0x4AEE; }
-@@ -2677,4 +2705,8 @@ static inline uint8_t get_ecm_mode(const ECM_REQUEST *er) {
+@@ -2702,4 +2730,8 @@ static inline uint8_t get_ecm_mode(const ECM_REQUEST *er) {
  #endif
  const char *get_cardsystem_desc_by_caid(uint16_t caid);
  
@@ -1229,169 +615,8 @@ index 9287aed3..04e27699 100644
  	{
  		cs_log_dbg(D_CACHEEX, "push received ecm with null odd/even byte from %s", csp ? "csp" : username(cl));
  		cl->cwcacheexerr++;
-diff --git a/module-camd35-cacheex.c b/module-camd35-cacheex.c
-index b03989b0..f7258a02 100644
---- a/module-camd35-cacheex.c
-+++ b/module-camd35-cacheex.c
-@@ -267,51 +267,16 @@ void camd35_cacheex_feature_trigger_in(struct s_client *cl, uint8_t *buf)
- 			}
- 			break;
- 		// aio-version
--		case 32: ;
--			uint16_t payload_size = b2i(2, buf + i + 2);
-+		case 32:
- 			if(cl->typ == 'c' && cl->account->cacheex.mode > 0)
- 			{
- 				char *ofs = (char *)buf + i + 4;
--				memset(cl->account->cacheex.aio_version, 0, sizeof(cl->account->cacheex.aio_version));
--				if(payload_size > 0)
--				{
--					size_t str_len = strnlen(ofs, payload_size);
--					if(str_len >= sizeof(cl->account->cacheex.aio_version))
--						str_len = sizeof(cl->account->cacheex.aio_version) - 1;
--					memcpy(cl->account->cacheex.aio_version, ofs, str_len);
--					// sanitize: remove non-printable characters
--					size_t x;
--					for(x = 0; x < str_len; x++)
--					{
--						if(cl->account->cacheex.aio_version[x] < 0x20 || cl->account->cacheex.aio_version[x] > 0x7E)
--						{
--							cl->account->cacheex.aio_version[x] = '\0';
--							break;
--						}
--					}
--				}
-+				cs_strncpy(cl->account->cacheex.aio_version, ofs, sizeof(cl->account->cacheex.aio_version));
- 			}
- 			else if(cl->typ == 'p' && cl->reader->cacheex.mode > 0)
- 			{
- 				char *ofs = (char *)buf + i + 4;
--				memset(cl->reader->cacheex.aio_version, 0, sizeof(cl->reader->cacheex.aio_version));
--				if(payload_size > 0)
--				{
--					size_t str_len = strnlen(ofs, payload_size);
--					if(str_len >= sizeof(cl->reader->cacheex.aio_version))
--						str_len = sizeof(cl->reader->cacheex.aio_version) - 1;
--					memcpy(cl->reader->cacheex.aio_version, ofs, str_len);
--					// sanitize: remove non-printable characters
--					size_t x;
--					for(x = 0; x < str_len; x++)
--					{
--						if(cl->reader->cacheex.aio_version[x] < 0x20 || cl->reader->cacheex.aio_version[x] > 0x7E)
--						{
--							cl->reader->cacheex.aio_version[x] = '\0';
--							break;
--						}
--					}
--				}
-+				cs_strncpy(cl->reader->cacheex.aio_version, ofs, sizeof(cl->reader->cacheex.aio_version));
- 			}
- 			break;
- 		// lg_only_tab caid:prov1[,provN][;caid:prov]
-@@ -701,12 +666,11 @@ void camd35_cacheex_feature_trigger(struct s_client *cl, int32_t feature, uint8_
- 			break;
- 		// aio-version
- 		case 32: ;
--			size += CS_AIO_VERSION_LEN;
-+			size += 12;
- 			if(size < 32)
- 				size = 32;
- 
--			uint8_t token[CS_AIO_VERSION_LEN];
--			memset(token, 0, sizeof(token));
-+			uint8_t token[18];
- 
- 			// bitfield
- 			i2b_buf(2, feature, payload + i);
-@@ -1128,7 +1092,7 @@ static int32_t camd35_cacheex_push_chk(struct s_client *cl, ECM_REQUEST *er)
- 		}
- 	}
- 
--	//if(chk_is_null_nodeid(remote_node)){
-+	//if(chk_is_null_nodeid(remote_node,8)){
- 	if(!cl->ncd_skey[8])
- 	{
- 		cs_log_dbg(D_CACHEEX, "cacheex: NO peer_node_id got yet, skip!");
-diff --git a/module-cccam-cacheex.c b/module-cccam-cacheex.c
-index 039f4642..5acc7b9a 100644
---- a/module-cccam-cacheex.c
-+++ b/module-cccam-cacheex.c
-@@ -269,51 +269,16 @@ void cc_cacheex_feature_trigger_in(struct s_client *cl, uint8_t *buf)
- 			}
- 			break;
- 		// aio-version
--		case 32: ;
--			uint16_t payload_size = b2i(2, buf + i + 2);
-+		case 32:
- 			if(cl->typ == 'c' && cl->account->cacheex.mode > 0)
- 			{
- 				char *ofs = (char *)buf + i + 4;
--				memset(cl->account->cacheex.aio_version, 0, sizeof(cl->account->cacheex.aio_version));
--				if(payload_size > 0)
--				{
--					size_t str_len = strnlen(ofs, payload_size);
--					if(str_len >= sizeof(cl->account->cacheex.aio_version))
--						str_len = sizeof(cl->account->cacheex.aio_version) - 1;
--					memcpy(cl->account->cacheex.aio_version, ofs, str_len);
--					// sanitize: remove non-printable characters
--					size_t x;
--					for(x = 0; x < str_len; x++)
--					{
--						if(cl->account->cacheex.aio_version[x] < 0x20 || cl->account->cacheex.aio_version[x] > 0x7E)
--						{
--							cl->account->cacheex.aio_version[x] = '\0';
--							break;
--						}
--					}
--				}
-+				cs_strncpy(cl->account->cacheex.aio_version, ofs, sizeof(cl->account->cacheex.aio_version));
- 			}
- 			else if(cl->typ == 'p' && cl->reader->cacheex.mode > 0)
- 			{
- 				char *ofs = (char *)buf + i + 4;
--				memset(cl->reader->cacheex.aio_version, 0, sizeof(cl->reader->cacheex.aio_version));
--				if(payload_size > 0)
--				{
--					size_t str_len = strnlen(ofs, payload_size);
--					if(str_len >= sizeof(cl->reader->cacheex.aio_version))
--						str_len = sizeof(cl->reader->cacheex.aio_version) - 1;
--					memcpy(cl->reader->cacheex.aio_version, ofs, str_len);
--					// sanitize: remove non-printable characters
--					size_t x;
--					for(x = 0; x < str_len; x++)
--					{
--						if(cl->reader->cacheex.aio_version[x] < 0x20 || cl->reader->cacheex.aio_version[x] > 0x7E)
--						{
--							cl->reader->cacheex.aio_version[x] = '\0';
--							break;
--						}
--					}
--				}
-+				cs_strncpy(cl->reader->cacheex.aio_version, ofs, sizeof(cl->reader->cacheex.aio_version));
- 			}
- 			break;
- 		// lg_only_tab caid:prov1[,provN][;caid:prov]
-@@ -695,8 +660,7 @@ void cc_cacheex_feature_trigger(struct s_client *cl, int32_t feature, uint8_t mo
- 			break;
- 		// aio-version
- 		case 32: ;
--			uint8_t token[CS_AIO_VERSION_LEN];
--			memset(token, 0, sizeof(token));
-+			uint8_t token[18];
- 
- 			// bitfield
- 			i2b_buf(2, feature, payload + i);
-@@ -1081,7 +1045,7 @@ void cc_cacheex_filter_in(struct s_client *cl, uint8_t *buf)
- static int32_t cc_cacheex_push_chk(struct s_client *cl, struct ecm_request_t *er)
- {
- 	struct cc_data *cc = cl->cc;
--	if(chk_is_null_nodeid(cc->peer_node_id))
-+	if(chk_is_null_nodeid(cc->peer_node_id,8))
- 	{
- 		cs_log_dbg(D_CACHEEX, "cacheex: NO peer_node_id got yet, skip!");
- 		return 0;
 diff --git a/module-cccam.c b/module-cccam.c
-index b3e55ed2..95cdb4b2 100644
+index b3e55ed2..83515ce8 100644
 --- a/module-cccam.c
 +++ b/module-cccam.c
 @@ -1009,7 +1009,7 @@ int32_t cc_send_cli_data(struct s_client *cl)
@@ -1413,7 +638,7 @@ index b3e55ed2..95cdb4b2 100644
  		{
  			int32_t goodSidCount = ll_count(ncard->goodsids);
  			int32_t badSidCount = ll_count(ncard->badsids);
-@@ -1583,13 +1584,20 @@ struct cc_card *get_matching_card(struct s_client *cl, ECM_REQUEST *cur_er, int8
+@@ -1583,7 +1584,7 @@ struct cc_card *get_matching_card(struct s_client *cl, ECM_REQUEST *cur_er, int8
  				}
  			}
  
@@ -1421,88 +646,6 @@ index b3e55ed2..95cdb4b2 100644
 +			if(!(rdr->cc_want_emu) && caid_is_nagra(ncard->caid) && (!xcard || ncard->hop < xcard->hop))
  			{
  				xcard = ncard; // remember card (D+ / 1810 fix) if request has no provider, but card has
- 			}
- 
- 			rating = ncard->rating - ncard->hop * HOP_RATING;
--			rating = MIN(MAX(rating, MIN_RATING), MAX_RATING);
-+			if(rating < MIN_RATING)
-+			{
-+				rating = MIN_RATING;
-+			}
-+			else if(rating > MAX_RATING)
-+			{
-+				rating = MAX_RATING;
-+			}
- 
- 			if(!ll_count(ncard->providers)) // card has no providers:
- 			{
-@@ -2263,6 +2271,24 @@ int32_t is_null_dcw(uint8_t *dcw)
- 	return 1;
- }
- 
-+/*int32_t is_dcw_corrupted(uint8_t *dcw)
-+{
-+	int32_t i;
-+	int32_t c, cs;
-+
-+	for(i = 0; i < 16; i += 4)
-+	{
-+		c = (dcw[i] + dcw[i + 1] + dcw[i + 2]) & 0xFF;
-+		cs = dcw[i + 3];
-+
-+		if(cs != c)
-+		{
-+			return (1);
-+		}
-+	}
-+	return 0;
-+}*/
-+
- int32_t check_extended_mode(struct s_client *cl, char *msg)
- {
- 	// Extended mode: if PARTNER String is ending with [PARAM], extended mode is activated
-@@ -3266,7 +3292,10 @@ int32_t cc_parse_msg(struct s_client *cl, uint8_t *buf, int32_t l)
- 							add_sid_block(card, &srvid, true);
- 						}
- 
--						card->rating = MAX(card->rating, MIN_RATING);
-+						if(card->rating < MIN_RATING)
-+						{
-+							card->rating = MIN_RATING;
-+						}
- 
- 						if(cfg.cc_forward_origin_card && card->origin_reader == rdr)
- 						{
-@@ -3575,11 +3604,19 @@ int32_t cc_parse_msg(struct s_client *cl, uint8_t *buf, int32_t l)
- 								cs_log_dbg(D_READER, "%s card %04X is too slow, moving to the end...", getprefix(), card->id);
- 								move_card_to_end(cl, card);
- 
--								card->rating = MAX(card->rating - 1, MIN_RATING);
-+								card->rating--;
-+								if(card->rating < MIN_RATING)
-+								{
-+									card->rating = MIN_RATING;
-+								}
- 							}
- 							else
- 							{
--								card->rating = MIN(card->rating + 1, MAX_RATING);
-+								card->rating++;
-+								if(card->rating > MAX_RATING)
-+								{
-+									card->rating = MAX_RATING;
-+								}
- 							}
- 						}
- 					}
-@@ -3827,7 +3864,7 @@ int32_t cc_parse_msg(struct s_client *cl, uint8_t *buf, int32_t l)
- 			// Unkwon commands... need workout algo
- 			if(cl->typ == 'c') // client connection
- 			{
--				//switching to an older version and then disconnect...
-+				//switching to an oder version and then disconnect...
- 				cs_strncpy(cfg.cc_version, version[0], sizeof(cfg.cc_version));
- 				ret = -1;
  			}
 diff --git a/module-cw-cycle-check.c b/module-cw-cycle-check.c
 index 999b6bb8..9afb237c 100644
@@ -1583,7 +726,7 @@ index 2adf4518..76f0a6ff 100644
  			ErrorCode = oscam_sttkd_KeyWrite(tkd_desc_info[demux[demux_id].dev_index].key_hndl, l, cw + (l * 8));
  
 diff --git a/module-dvbapi.c b/module-dvbapi.c
-index 420a7ff8..e349e52d 100644
+index 420a7ff8..f02f3235 100644
 --- a/module-dvbapi.c
 +++ b/module-dvbapi.c
 @@ -1887,7 +1887,14 @@ void dvbapi_start_emm_filter(int32_t demux_id)
@@ -1737,40 +880,15 @@ index 420a7ff8..e349e52d 100644
  	{
  		dvbapi_start_pmt_filter(demux_id);
  	}
-@@ -5584,9 +5677,10 @@ void dvbapi_process_input(int32_t demux_id, int32_t filter_num, uint8_t *buffer,
- 		return;
- 	}
- 
--	if(filtertype == TYPE_ECM && curpid)
-+	if(filtertype == TYPE_ECM)
+@@ -5587,6 +5680,7 @@ void dvbapi_process_input(int32_t demux_id, int32_t filter_num, uint8_t *buffer,
+ 	if(filtertype == TYPE_ECM && curpid)
  	{
  		uint32_t chid = 0x10000;
 +		int8_t pvu_skip = 0;
  		ECM_REQUEST *er;
  
  		if(len != 0) // len = 0 receiver encountered an internal bufferoverflow!
-@@ -5599,21 +5693,42 @@ void dvbapi_process_input(int32_t demux_id, int32_t filter_num, uint8_t *buffer,
- 				cs_log_dbg(D_DVBAPI, "Received data with total length 0x%03X but max supported ECM length is 0x%03X -> Please report!",
- 					sctlen, MAX_ECM_SIZE);
- 
--				curpid->tries -= 0x0E;
--
-+				if(curpid)
-+				{
-+					curpid->tries -= 0x0E;
-+				}
- 				return;
- 			}
- 
- 			if(!(buffer[0] == 0x80 || buffer[0] == 0x81))
- 			{
- 				cs_log_dbg(D_DVBAPI, "Received an ECM with invalid ecmtable ID %02X -> ignoring!", buffer[0]);
--				curpid->tries--;
--
-+				if(curpid)
-+				{
-+					curpid->tries--;
-+				}
+@@ -5612,8 +5706,25 @@ void dvbapi_process_input(int32_t demux_id, int32_t filter_num, uint8_t *buffer,
  				return;
  			}
  
@@ -1797,7 +915,7 @@ index 420a7ff8..e349e52d 100644
  			{
  				if(!(er = get_ecmtask()))
  				{
-@@ -5957,6 +6072,35 @@ void dvbapi_process_input(int32_t demux_id, int32_t filter_num, uint8_t *buffer,
+@@ -5957,6 +6068,35 @@ void dvbapi_process_input(int32_t demux_id, int32_t filter_num, uint8_t *buffer,
  			return; // just skip on internal buffer overflow
  		}
  
@@ -1833,7 +951,7 @@ index 420a7ff8..e349e52d 100644
  		// fix to handle more than one irdeto emm packet
  		uint8_t *pbuf = buffer;
  		int32_t done = 0;
-@@ -7186,8 +7330,10 @@ void dvbapi_write_cw(int32_t demux_id, int32_t pid, int32_t stream_id, uint8_t *
+@@ -7186,8 +7326,10 @@ void dvbapi_write_cw(int32_t demux_id, int32_t pid, int32_t stream_id, uint8_t *
  	for(n = 0; n < 2; n++)
  	{
  		// Check if cw has changed and if new cw is empty (all zeros)
@@ -1845,7 +963,7 @@ index 420a7ff8..e349e52d 100644
  		{
  			// prepare ca device
  			uint32_t idx = dvbapi_ca_set_pid(demux_id, pid, stream_id, (algo == CA_ALGO_DES), msgid);
-@@ -7479,7 +7625,9 @@ void dvbapi_send_dcw(struct s_client *client, ECM_REQUEST *er)
+@@ -7479,7 +7621,9 @@ void dvbapi_send_dcw(struct s_client *client, ECM_REQUEST *er)
  
  		// 0=matching ecm hash, 2=no filter, 3=table reset, 4=cache-ex response
  		// Check only against last_cw[0] (index 0) - No need to check the rest
@@ -1856,21 +974,7 @@ index 420a7ff8..e349e52d 100644
  		{
  			// check for matching control word
  			if(memcmp(er->cw, demux[i].last_cw[0][0], 8) == 0 &&
-@@ -8221,11 +8369,10 @@ int32_t dvbapi_set_section_filter(int32_t demux_id, ECM_REQUEST *er, int32_t n)
- 	struct s_ecmpid *curpid = NULL;
- 
- 	int32_t pid = demux[demux_id].demux_fd[n].pidindex;
--	if(pid == -1)
-+	if(pid != -1)
- 	{
--		return -1;
-+		curpid = &demux[demux_id].ECMpids[pid];
- 	}
--	curpid = &demux[demux_id].ECMpids[pid];
- 
- 	if(curpid->table != er->ecm[0] && curpid->table != 0)
- 	{
-@@ -8483,7 +8630,9 @@ int32_t dvbapi_check_ecm_delayed_delivery(int32_t demux_id, ECM_REQUEST *er)
+@@ -8483,7 +8627,9 @@ int32_t dvbapi_check_ecm_delayed_delivery(int32_t demux_id, ECM_REQUEST *er)
  	}
  
  	// Check for null cw
@@ -11390,178 +10494,11 @@ index 00000000..865e6687
 +}
 +
 +#endif // WITH_EMU
-diff --git a/module-monitor.c b/module-monitor.c
-index 10be173b..f603f85c 100644
---- a/module-monitor.c
-+++ b/module-monitor.c
-@@ -256,7 +256,7 @@ static char *monitor_client_info(char id, struct s_client *cl, char *sbuf)
- 
- 	if(cl)
- 	{
--		char ldate[20], ltime[16];
-+		char ldate[16], ltime[16];
- 		const char *usr;
- 		int32_t lsec, isec, con, cau, lrt = - 1;
- 		time_t now;
-@@ -314,9 +314,9 @@ static char *monitor_client_info(char id, struct s_client *cl, char *sbuf)
- 				lrt = cl->cwlastresptime;
- 			}
- 			localtime_r(&cl->login, &lt);
-+			// snprintf(ldate, sizeof(ldate), " %02d.%02d.%02d", lt.tm_mday, lt.tm_mon + 1, lt.tm_year % 100);
- 			int32_t cnr = get_threadnum(cl);
--			snprintf(ldate, sizeof(ldate), " %02d.%02d.%02d", lt.tm_mday, lt.tm_mon + 1, lt.tm_year % 100);
--			snprintf(ltime, sizeof(ltime), "%02d:%02d:%02d", lt.tm_hour, lt.tm_min, lt.tm_sec);
-+			snprintf(ltime, sizeof(ldate), "%02d:%02d:%02d", lt.tm_hour, lt.tm_min, lt.tm_sec);
- 			snprintf(sbuf, 256, "[%c--CCC]%8X|%c|%d|%s|%d|%d|%s|%d|%s|%s|%s|%d|%04X@%06X:%04X|%s|%d|%d|%d|%d|%d|%d|%d|%d|%d|%d\n",
- 					 id, cl->tid, cl->typ, cnr, usr, cau, cl->crypted,
- 					 cs_inet_ntoa(cl->ip), cl->port, client_get_proto(cl),
-diff --git a/module-newcamd-des.c b/module-newcamd-des.c
-index 8ce6ae37..3e07101b 100644
---- a/module-newcamd-des.c
-+++ b/module-newcamd-des.c
-@@ -2,8 +2,15 @@
- #include "module-newcamd-des.h"
- #include "oscam-string.h"
- 
-+#define DES_ECS2_DECRYPT (DES_IP | DES_IP_1 | DES_RIGHT)
-+#define DES_ECS2_CRYPT   (DES_IP | DES_IP_1)
-+
- #define CRYPT        0
- #define HASH         1
-+#define F_EURO_S2    0
-+#define F_TRIPLE_DES 1
-+
-+#define TestBit(addr, bit) ((addr) & (1 << bit))
- 
- extern const int32_t CWS_NETMSGSIZE;
- 
-@@ -420,17 +427,80 @@ static void des_random_get(uint8_t *buffer, uint8_t len)
- 	}
- }
- 
--static void EuroDes(uint8_t key[], uint8_t operatingMode, uint8_t data[])
-+static uint8_t getmask(uint8_t *OutData, uint8_t *Mask, uint8_t I, uint8_t J)
- {
--	/* Eurocrypt 3-DES */
--	uint8_t mode = (operatingMode == HASH) ? 0 : DES_RIGHT;
--	nc_des(key, (uint8_t)(DES_IP | mode), data);
-+	uint8_t K, B, M, M1 , D, DI, MI;
- 
--	mode ^= DES_RIGHT;
--	nc_des(key + 8, mode, data);
-+	K = I ^ J;
-+	DI = 7;
-+	if((K & 4) == 4)
-+	{
-+		K ^= 7;
-+		DI ^= 7;
-+	}
-+	MI = 3;
-+	MI &= J;
-+	K ^= MI;
-+	K += MI;
-+	if((K & 4) == 4)
-+	{
-+		return 0;
-+	}
-+	DI ^= J;
-+	D = OutData[DI];
-+	MI = 0;
-+	MI += J;
-+	M1 = Mask[MI];
-+	MI ^= 4;
-+	M = Mask[MI];
-+	B = 0;
-+	for(K = 0; K <= 7; K++)
-+	{
-+		if((D & 1) == 1) { B += M; }
-+		D = (D >> 1) + ((B & 1) << 7);
-+		B = B >> 1;
-+	}
-+	return D ^ M1;
-+}
- 
--	mode ^= DES_RIGHT;
--	nc_des(key, (uint8_t)(mode | DES_IP_1), data);
-+static void v2mask(uint8_t *cw, uint8_t *mask)
-+{
-+	int i, j;
-+
-+	for(i = 7; i >= 0; i--)
-+		for(j = 7; j >= 4; j--)
-+			{ cw[i] ^= getmask(cw, mask, i, j); }
-+	for(i = 0; i <= 7; i++)
-+		for(j = 0; j <= 3; j++)
-+			{ cw[i] ^= getmask(cw, mask, i, j); }
-+}
-+
-+static void EuroDes(uint8_t key1[], uint8_t key2[], uint8_t operatingMode, uint8_t data[])
-+{
-+	uint8_t mode;
-+
-+	if(key1[7]) /* Viaccess */
-+	{
-+		mode = (operatingMode == HASH) ? DES_ECM_HASH : DES_ECM_CRYPT;
-+
-+		if(key2 != NULL)
-+			{ v2mask(data, key2); }
-+		nc_des(key1, mode, data);
-+		if(key2 != NULL)
-+			{ v2mask(data, key2); }
-+	}
-+	else
-+	{
-+		/* Eurocrypt 3-DES */
-+		mode = (operatingMode == HASH) ? 0 : DES_RIGHT;
-+		nc_des(key1, (uint8_t)(DES_IP | mode), data);
-+
-+		mode ^= DES_RIGHT;
-+		nc_des(key2, mode, data);
-+
-+		mode ^= DES_RIGHT;
-+		nc_des(key1, (uint8_t)(mode | DES_IP_1), data);
-+	}
- }
- 
- int nc_des_encrypt(uint8_t *buffer, int len, uint8_t *deskey)
-@@ -454,7 +524,7 @@ int nc_des_encrypt(uint8_t *buffer, int len, uint8_t *deskey)
- 	{
- 		uint8_t j;
- 		for(j = 0; j < 8; j++) { buffer[i + j] ^= ivec[j]; }
--		EuroDes(deskey, HASH, buffer + i);
-+		EuroDes(deskey, deskey + 8, HASH, buffer + i);
- 		memcpy(ivec, buffer + i, 8);
- 	}
- 	len += 8;
-@@ -478,7 +548,7 @@ int nc_des_decrypt(uint8_t *buffer, int len, uint8_t *deskey)
- 
- 		memcpy(ivec, nextIvec, 8);
- 		memcpy(nextIvec, buffer + i, 8);
--		EuroDes(deskey, CRYPT, buffer + i);
-+		EuroDes(deskey, deskey + 8, CRYPT, buffer + i);
- 		for(j = 0; j < 8; j++)
- 			{ buffer[i + j] ^= ivec[j]; }
- 	}
-@@ -487,7 +557,7 @@ int nc_des_decrypt(uint8_t *buffer, int len, uint8_t *deskey)
- 	return len;
- }
- 
--void nc_des_login_key_get(uint8_t *key1, uint8_t *key2, int len, uint8_t *des16)
-+uint8_t *nc_des_login_key_get(uint8_t *key1, uint8_t *key2, int len, uint8_t *des16)
- {
- 	uint8_t des14[14];
- 	int i;
-@@ -497,4 +567,5 @@ void nc_des_login_key_get(uint8_t *key1, uint8_t *key2, int len, uint8_t *des16)
- 	des16 = des_key_spread(des14, des16);
- 	doPC1(des16);
- 	doPC1(des16 + 8);
-+	return des16;
- }
 diff --git a/module-newcamd-des.h b/module-newcamd-des.h
-index 7b048140..25701ac8 100644
+index 7b048140..29f96e4e 100644
 --- a/module-newcamd-des.h
 +++ b/module-newcamd-des.h
-@@ -6,9 +6,12 @@
+@@ -6,6 +6,9 @@
  #define DES_RIGHT 4
  #define DES_HASH  8
  
@@ -11571,12 +10508,8 @@ index 7b048140..25701ac8 100644
  void nc_des(uint8_t key[], uint8_t mode, uint8_t data[]);
  int nc_des_encrypt(uint8_t *buffer, int len, uint8_t *deskey);
  int nc_des_decrypt(uint8_t *buffer, int len, uint8_t *deskey);
--void nc_des_login_key_get(uint8_t *key1, uint8_t *key2, int len, uint8_t *des16);
-+uint8_t *nc_des_login_key_get(uint8_t *key1, uint8_t *key2, int len, uint8_t *des16);
- 
- #endif
 diff --git a/module-newcamd.c b/module-newcamd.c
-index 679f25ac..7c23924c 100644
+index 679f25ac..6495a30e 100644
 --- a/module-newcamd.c
 +++ b/module-newcamd.c
 @@ -1118,6 +1118,13 @@ static int8_t newcamd_auth_client(IN_ADDR_T ip, uint8_t *deskey)
@@ -11602,50 +10535,11 @@ index 679f25ac..7c23924c 100644
  					{
  						for(k = 0; k < aureader->nprov; k++)
  						{
-@@ -1691,10 +1698,16 @@ void newcamd_idle(void)
- 
- int32_t newcamd_client_init(struct s_client *client)
- {
-+	char ptxt[1]
-+#if defined(__STDC_VERSION__) && __STDC_VERSION__ >= 202311L //gcc-15+
-+	__attribute__((nonstring))
-+#endif
-+	= { "\0" };
-+
- 	client->ncd_proto = client->reader->ncd_proto;
- 
--	cs_log("proxy %s:%d newcamd52%d (fd=%d)", client->reader->device, client->reader->r_port,
--			(client->reader->ncd_proto == NCD_525) ? 5 : 4, client->udp_fd);
-+	cs_log("proxy %s:%d newcamd52%d (fd=%d%s)", client->reader->device, client->reader->r_port,
-+			(client->reader->ncd_proto == NCD_525) ? 5 : 4, client->udp_fd, ptxt);
- 
- 	// try to connect. ignore possible failures
- 	// idle reconnect (tcp_ito = -1) will trigger an additional connect anyway
 diff --git a/module-stat.c b/module-stat.c
-index 324c43bc..5ca3aedd 100644
+index 324c43bc..284f47e0 100644
 --- a/module-stat.c
 +++ b/module-stat.c
-@@ -125,9 +125,7 @@ void load_stat_from_file(void)
- 
- 	int32_t i = 1;
- 	int32_t valid = 0;
--#ifdef WITH_DEBUG
- 	int32_t count = 0;
--#endif
- 	int32_t type = 0;
- 	char *ptr, *saveptr1 = NULL;
- 	char *split[12];
-@@ -198,9 +196,7 @@ void load_stat_from_file(void)
- 				}
- 
- 				ll_append(rdr->lb_stat, s);
--#ifdef WITH_DEBUG
- 				count++;
--#endif
- 			}
- 			else
- 			{
-@@ -901,7 +897,7 @@ void check_lb_auto_betatunnel_mode(ECM_REQUEST *er)
+@@ -901,7 +901,7 @@ void check_lb_auto_betatunnel_mode(ECM_REQUEST *er)
  
  uint16_t get_rdr_caid(struct s_reader *rdr)
  {
@@ -11654,7 +10548,7 @@ index 324c43bc..5ca3aedd 100644
  	{
  		return 0; // reader caid is not real caid
  	}
-@@ -1292,7 +1288,7 @@ void stat_get_best_reader(ECM_REQUEST *er)
+@@ -1292,7 +1292,7 @@ void stat_get_best_reader(ECM_REQUEST *er)
  		for(ea = er->matching_rdr; ea; ea = ea->next)
  		{
  			rdr = ea->reader;
@@ -12905,33 +11799,11 @@ index f43ff557..2f0e1b16 100644
  #endif // MODULE_STREAMRELAY
  
  #endif // MODULE_STREAMRELAY_H_
-diff --git a/module-webif-lib.c b/module-webif-lib.c
-index 253adba0..9fcd65c4 100644
---- a/module-webif-lib.c
-+++ b/module-webif-lib.c
-@@ -686,8 +686,8 @@ int8_t get_stats_linux(const pid_t pid, struct pstat* result)
- 				break;
- 			}
- 		}
--		fclose(fd);
- 	}
-+	fclose(fd);
- 
- 	// read processes from /proc
- 	uint info_procs = 0;
 diff --git a/module-webif-tpl.c b/module-webif-tpl.c
-index 7ca98749..66ce02a9 100644
+index 7bdc6da3..bd13862c 100644
 --- a/module-webif-tpl.c
 +++ b/module-webif-tpl.c
-@@ -398,7 +398,6 @@ char *tpl_getUnparsedTpl(const char *name, int8_t removeHeader, const char *subd
- 											check_conf(CARDREADER_DRECAS, ptr2);
- 											check_conf(CARDREADER_INTERNAL_AZBOX, ptr2);
- 											check_conf(CARDREADER_INTERNAL_COOLAPI, ptr2);
--											check_conf(CARDREADER_INTERNAL_AMSMC, ptr2);
- 											check_conf(CARDREADER_INTERNAL_SCI, ptr2);
- 											check_conf(CARDREADER_SC8IN1, ptr2);
- 											check_conf(CARDREADER_MP35, ptr2);
-@@ -456,6 +455,7 @@ char *tpl_getUnparsedTpl(const char *name, int8_t removeHeader, const char *subd
+@@ -456,6 +456,7 @@ char *tpl_getUnparsedTpl(const char *name, int8_t removeHeader, const char *subd
  											check_conf(WITH_SSL, ptr2);
  											check_conf(WITH_STAPI, ptr2);
  											check_conf(WITH_STAPI5, ptr2);
@@ -12940,10 +11812,10 @@ index 7ca98749..66ce02a9 100644
  										if(ok == 0)
  										{
 diff --git a/module-webif.c b/module-webif.c
-index 38ff335c..2a2965ce 100644
+index 376fe793..203395c7 100644
 --- a/module-webif.c
 +++ b/module-webif.c
-@@ -137,8 +137,9 @@ static bool use_srvid2 = false;
+@@ -141,8 +141,9 @@ static bool use_srvid2 = false;
  #define MNU_GBX_FSTAINF     27
  #define MNU_GBX_FEXPINF     28
  #define MNU_GBX_INFOLOG     29
@@ -12954,7 +11826,7 @@ index 38ff335c..2a2965ce 100644
  
  static void set_status_info_var(struct templatevars *vars, char *varname, int no_data, char *fmt, double value)
  {
-@@ -1328,6 +1329,11 @@ static char *send_oscam_config_streamrelay(struct templatevars *vars, struct uri
+@@ -1332,6 +1333,11 @@ static char *send_oscam_config_streamrelay(struct templatevars *vars, struct uri
  
  	tpl_printf(vars, TPLADD, "STREAM_RELAY_BUFFER_TIME", "%d", cfg.stream_relay_buffer_time);
  	tpl_printf(vars, TPLADD, "STREAM_RELAY_RECONNECT_COUNT", "%d", cfg.stream_relay_reconnect_count);
@@ -12966,7 +11838,7 @@ index 38ff335c..2a2965ce 100644
  
  	tpl_printf(vars, TPLADD, "TMP", "STREAMCONFIGCLIENTSELECTED%d", cfg.stream_display_client);
  	tpl_addVar(vars, TPLADD, tpl_getVar(vars, "TMP"), "selected");
-@@ -2447,7 +2453,7 @@ static char *send_oscam_reader_config(struct templatevars *vars, struct uriparam
+@@ -2451,7 +2457,7 @@ static char *send_oscam_reader_config(struct templatevars *vars, struct uriparam
  		chk_reader("services", servicelabels, rdr);
  		chk_reader("lb_whitelist_services", servicelabelslb, rdr);
  
@@ -12975,7 +11847,7 @@ index 38ff335c..2a2965ce 100644
  		{
  			if(rdr)
  				{
-@@ -3220,6 +3226,8 @@ static char *send_oscam_reader_config(struct templatevars *vars, struct uriparam
+@@ -3243,6 +3249,8 @@ static char *send_oscam_reader_config(struct templatevars *vars, struct uriparam
  	tpl_printf(vars, TPLADD, "RESHARE",      "%d", cfg.cc_reshare);
  	tpl_printf(vars, TPLADD, "CCCRECONNECT", "%d", rdr->cc_reconnect);
  
@@ -12984,7 +11856,7 @@ index 38ff335c..2a2965ce 100644
  	if(rdr->cc_keepalive)
  		{ tpl_addVar(vars, TPLADD, "KEEPALIVECHECKED", "checked"); }
  #endif
-@@ -3257,6 +3265,23 @@ static char *send_oscam_reader_config(struct templatevars *vars, struct uriparam
+@@ -3280,6 +3288,23 @@ static char *send_oscam_reader_config(struct templatevars *vars, struct uriparam
  	tpl_addVar(vars, TPLADD, "USERSCRIPT", rdr->userscript);
  #endif
  
@@ -13008,7 +11880,7 @@ index 38ff335c..2a2965ce 100644
  	tpl_addVar(vars, TPLADD, "PROTOCOL", reader_get_type_desc(rdr, 0));
  
  	// Show only parameters which needed for the reader
-@@ -3278,6 +3303,9 @@ static char *send_oscam_reader_config(struct templatevars *vars, struct uriparam
+@@ -3301,6 +3326,9 @@ static char *send_oscam_reader_config(struct templatevars *vars, struct uriparam
  	case R_CAMD35 :
  		tpl_addVar(vars, TPLAPPEND, "READERDEPENDINGCONFIG", tpl_getTpl(vars, "READERCONFIGCAMD35BIT"));
  		break;
@@ -13018,7 +11890,7 @@ index 38ff335c..2a2965ce 100644
  	case R_CS378X :
  		tpl_addVar(vars, TPLAPPEND, "READERDEPENDINGCONFIG", tpl_getTpl(vars, "READERCONFIGCS378XBIT"));
  		break;
-@@ -5311,9 +5339,34 @@ static char *send_oscam_entitlement(struct templatevars *vars, struct uriparams
+@@ -5334,9 +5362,34 @@ static char *send_oscam_entitlement(struct templatevars *vars, struct uriparams
  
  					tpl_addVar(vars, TPLAPPEND, "LOGHISTORY", "<BR><BR>New Structure:<BR>");
  					char tbuffer[83];
@@ -13053,24 +11925,7 @@ index 38ff335c..2a2965ce 100644
  						localtime_r(&item->start, &start_t);
  						localtime_r(&item->end, &end_t);
  
-@@ -5594,6 +5647,7 @@ static char *send_oscam_logpoll(struct templatevars * vars, struct uriparams * p
- 
- static char *send_oscam_status(struct templatevars * vars, struct uriparams * params, int32_t apicall)
- {
-+	int32_t i;
- 	const char *usr;
- 	int32_t lsec, isec, chsec, con, cau = 0;
- 	time_t now = time((time_t *)0);
-@@ -5752,7 +5806,7 @@ static char *send_oscam_status(struct templatevars * vars, struct uriparams * pa
- 
- 	cs_readlock(__func__, &readerlist_lock);
- 	cs_readlock(__func__, &clientlist_lock);
--	for(cl = first_client; cl ; cl = cl->next)
-+	for(i = 0, cl = first_client; cl ; cl = cl->next, i++)
- 	{
- #ifdef CS_CACHEEX_AIO
- #if defined(MODULE_CCCAM) && defined(CS_CACHEEX)
-@@ -5806,6 +5860,9 @@ static char *send_oscam_status(struct templatevars * vars, struct uriparams * pa
+@@ -5833,6 +5886,9 @@ static char *send_oscam_status(struct templatevars * vars, struct uriparams * pa
  						filtered = (type == cl->typ) || (type == 'x' && (cl->typ == 'p' || cl->typ == 'r') && (cl->reader && cl->reader->cacheex.mode));
  #else
  						filtered = (type == cl->typ);
@@ -13080,111 +11935,7 @@ index 38ff335c..2a2965ce 100644
  #endif
  					}
  				}
-@@ -6736,7 +6793,7 @@ static char *send_oscam_status(struct templatevars * vars, struct uriparams * pa
- 	if(cfg.http_status_log)
- 	{
- 		// Debuglevel Selector
--		int32_t i, lvl;
-+		int32_t lvl;
- 		for(i = 0; i < MAX_DEBUG_LEVELS; i++)
- 		{
- 			lvl = 1 << i;
-@@ -6859,10 +6916,11 @@ static char *send_oscam_services_edit(struct templatevars * vars, struct uripara
- 		for(sidtab = cfg.sidtab; sidtab != NULL && strcmp(label, sidtab->label) != 0; sidtab = sidtab->next) { ; }
- 	}
- 
-+	tpl_addVar(vars, TPLADD, "LABEL", xml_encode(vars, sidtab->label));
-+	tpl_addVar(vars, TPLADD, "LABELENC", urlencode(vars, sidtab->label));
-+
- 	if(sidtab)
- 	{
--		tpl_addVar(vars, TPLADD, "LABEL", xml_encode(vars, sidtab->label));
--		tpl_addVar(vars, TPLADD, "LABELENC", urlencode(vars, sidtab->label));
- #ifdef CS_CACHEEX_AIO
- 		tpl_addVar(vars, TPLADD, "DCRCCHECKED", (sidtab->disablecrccws_only_for_exception == 1) ? "checked" : "" );
- 		tpl_addVar(vars, TPLADD, "NWCHECKED", (sidtab->no_wait_time == 1) ? "checked" : "" );
-@@ -6994,7 +7052,6 @@ static char *send_oscam_services(struct templatevars * vars, struct uriparams *
- 	while(sidtab != NULL)
- 	{
- 		tpl_addVar(vars, TPLADD, "SID", "");
--		tpl_printf(vars, TPLADD, "SERVICENUM", "%d", counter + 1);
- 		if((strcmp(getParam(params, "service"), sidtab->label) == 0) && (strcmp(getParam(params, "action"), "list") == 0))
- 		{
- 			tpl_addVar(vars, TPLADD, "SIDCLASS", "sidlist");
-@@ -7140,7 +7197,7 @@ static char *send_oscam_script(struct templatevars * vars, struct uriparams * pa
- 			{
- 				if(s.st_mode & S_IXUSR)
- 				{
--					int32_t rc = -1;
-+					int32_t rc;
- 					FILE *fp;
- 					char buf[256];
- 
-@@ -7151,15 +7208,14 @@ static char *send_oscam_script(struct templatevars * vars, struct uriparams * pa
- 					}
- 
- 					fp = popen(system_str, "r");
--					if (fp)
-+
-+					while (fgets(buf, sizeof(buf), fp) != NULL)
- 					{
--						while (fgets(buf, sizeof(buf), fp) != NULL)
--						{
--							tpl_addVar(vars, TPLAPPEND, "SCRIPTRESULTOUT", buf);
--						}
--						rc = pclose(fp)/256;
-+						tpl_addVar(vars, TPLAPPEND, "SCRIPTRESULTOUT", buf);
- 					}
- 
-+					rc = pclose(fp)/256;
-+
- 					tpl_printf(vars, TPLAPPEND, "CODE", "returncode: %d", rc);
- 					tpl_printf(vars, TPLADD, "SCRIPTNAME", "scriptname: %s", scriptname);
- 				}
-@@ -7206,7 +7262,7 @@ static char *send_oscam_scanusb(struct templatevars * vars)
- 
- 		tpl_addVar(vars, TPLADD, header, txt);
- 		fp = popen(elems[i + 4], "r"); //command
--		if(!fp || !fgets(line, sizeof(line) - 1, fp))
-+		if(!fgets(line, sizeof(line) - 1, fp) || !fp)
- 		{
- 			tpl_addVar(vars, TPLADD, entry, error);
- 			tpl_addVar(vars, TPLADD, bit, tpl_getTpl(vars, scan));
-@@ -7227,8 +7283,8 @@ static char *send_oscam_scanusb(struct templatevars * vars)
- 				tpl_addVar(vars, TPLAPPEND, bit, tpl_getTpl(vars, scan));
- 			}
- 			while(fgets(line, sizeof(line) - 1, fp) != NULL);
--			pclose(fp);
- 		}
-+		pclose(fp);
- 	}
- #else
- 	tpl_addMsg(vars, "Function not supported in CYGWIN environment");
-@@ -7244,10 +7300,7 @@ static void webif_process_logfile(struct templatevars * vars, struct uriparams *
- 		if(cs_strlen(targetfile) > 0)
- 		{
- 			FILE *file = fopen(targetfile, "w");
--			if (file != NULL)
--			{
--				fclose(file);
--			}
-+			fclose(file);
- 		}
- 	}
- #ifdef WITH_DEBUG
-@@ -7307,10 +7360,7 @@ static void webif_process_userfile(struct templatevars * vars, struct uriparams
- 		if(cs_strlen(targetfile) > 0)
- 		{
- 			FILE *file = fopen(targetfile, "w");
--			if (file)
--			{
--				fclose(file);
--			}
-+			fclose(file);
- 		}
- 	}
- 	if(!cfg.disableuserfile)
-@@ -7397,6 +7447,9 @@ static char *send_oscam_files(struct templatevars * vars, struct uriparams * par
+@@ -7424,6 +7480,9 @@ static char *send_oscam_files(struct templatevars * vars, struct uriparams * par
  		{ "stats.info",      MNU_GBX_FSTAINF,   FTYPE_GBOX },     // id 27
  		{ "expired.info",    MNU_GBX_FEXPINF,   FTYPE_GBOX },     // id 28
  		{ "info.log",        MNU_GBX_INFOLOG,   FTYPE_GBOX },     // id 29
@@ -13194,7 +11945,7 @@ index 38ff335c..2a2965ce 100644
  #endif
  		{ NULL, 0, 0 },
  	};
-@@ -7869,7 +7922,11 @@ static char *send_oscam_EMM_running(struct templatevars * vars, struct uriparams
+@@ -7896,7 +7955,11 @@ static char *send_oscam_EMM_running(struct templatevars * vars, struct uriparams
  		else if(!proxy && rdr->csystem_active)     // local active reader
  		{
  			csystem = rdr->csystem;
@@ -13207,66 +11958,7 @@ index 38ff335c..2a2965ce 100644
  		}
  
  		if(csystem)
-@@ -8007,16 +8064,13 @@ static char *send_oscam_EMM(struct templatevars * vars, struct uriparams * param
- 					do {
- 						snprintf(orgfile, sizeof(orgfile), "%s.%d", targetfile, f);
- 						f++;
--					} while(access(orgfile, F_OK) != -1);
-+					} while(access(orgfile, 0|F_OK) != -1);
- 
- 					if(rename(targetfile, orgfile) == 0)
- 					{
- 						FILE *fs = fopen(targetfile, "w");
--						if (fs)
--						{
--							fprintf(fs, "%s", tpl_getVar(vars, "EMM_TMP"));
--							fclose(fs);
--						}
-+						fprintf(fs, "%s", tpl_getVar(vars, "EMM_TMP"));
-+						fclose(fs);
- 						tpl_printf(vars, TPLAPPEND, emm_txt, "<br><b>New reduced File created!</b> Size of Original File is higher as %d kB, saved to %s", emm_max_size[i], orgfile);
- 					}
- 				}
-@@ -8089,10 +8143,7 @@ static char *send_oscam_cacheex(struct templatevars * vars, struct uriparams * p
- 	char *pushing = "<IMG SRC=\"image?i=ICARRR\" ALT=\"Pushing\">";
- 	char *rowvariable = "";
- 
--	int16_t written = 0;
--#ifdef CS_CACHEEX_AIO
--	int16_t i = 0;
--#endif
-+	int16_t i, written = 0;
- 	struct s_client *cl;
- 	time_t now = time((time_t *)0);
- 	int delimiter=0;
-@@ -8110,10 +8161,9 @@ static char *send_oscam_cacheex(struct templatevars * vars, struct uriparams * p
- 	const char *cacheex_name_link_tpl = NULL;
- 	tpl_addVar(vars, TPLADD, "CLIENTDESCRIPTION", "");
- 
--	for(cl = first_client; cl ; cl = cl->next)
-+	for(i = 0, cl = first_client; cl ; cl = cl->next, i++)
- 	{
- #ifdef CS_CACHEEX_AIO
--		i++;
- 		char classname[9];
- 		snprintf(classname, 8, "class%02d", i) < 0 ? abort() : (void)0;
- 		classname[8] = '\0';
-@@ -8476,12 +8526,13 @@ static char *send_oscam_api(struct templatevars * vars, FILE * f, struct uripara
- 	}
- 	else if(strcmp(getParam(params, "part"), "ecmhistory") == 0)
- 	{
-+		int32_t i;
- 		int32_t isec;
- 		int32_t shown;
- 		time_t now = time((time_t *)0);
- 		const char *usr;
- 		struct s_client *cl;
--		for(cl = first_client; cl ; cl = cl->next)
-+		for(i = 0, cl = first_client; cl ; cl = cl->next, i++)
- 		{
- 			if(cl->wihidden != 1)
- 			{
-@@ -9059,7 +9110,11 @@ static int32_t readRequest(FILE * f, IN_ADDR_T in, char **result, int8_t forcePl
+@@ -9190,7 +9253,11 @@ static int32_t readRequest(FILE * f, IN_ADDR_T in, char **result, int8_t forcePl
  		memcpy(*result + bufsize, buf2, n);
  		bufsize += n;
  
@@ -13279,7 +11971,7 @@ index 38ff335c..2a2965ce 100644
  			cs_log("error: too much data received from %s", cs_inet_ntoa(in));
  			NULLFREE(*result);
 diff --git a/oscam-chk.c b/oscam-chk.c
-index 1f44e3b6..1b54442a 100644
+index 1f44e3b6..3dd9536a 100644
 --- a/oscam-chk.c
 +++ b/oscam-chk.c
 @@ -894,7 +894,7 @@ int32_t matching_reader(ECM_REQUEST *er, struct s_reader *rdr)
@@ -13318,77 +12010,6 @@ index 1f44e3b6..1b54442a 100644
  	{
  		return 1; // reader caid is not real caid
  	}
-@@ -1253,10 +1253,10 @@ int8_t chk_halfCW(ECM_REQUEST *er, uint8_t *cw)
- /**
-  * Check for NULL nodeid
-  **/
--int32_t chk_is_null_nodeid(uint8_t node_id[])
-+int32_t chk_is_null_nodeid(uint8_t node_id[], uint8_t len)
- {
- 	int8_t i;
--	for(i = 0; i < 8; i++)
-+	for(i = 0; i < len; i++)
- 	{
- 		if(node_id[i]) { return 0; }
- 	}
-diff --git a/oscam-chk.h b/oscam-chk.h
-index 38b3f3a3..1686673e 100644
---- a/oscam-chk.h
-+++ b/oscam-chk.h
-@@ -35,7 +35,7 @@ int32_t chk_bcaid(ECM_REQUEST *er, CAIDTAB *ctab);
- int32_t chk_is_null_CW(uint8_t cw[]);
- int8_t is_halfCW_er(ECM_REQUEST *er);
- int8_t chk_halfCW(ECM_REQUEST *er, uint8_t *cw);
--int32_t chk_is_null_nodeid(uint8_t node_id[]);
-+int32_t chk_is_null_nodeid(uint8_t node_id[], uint8_t len);
- bool check_client(struct s_client *cl);
- uint16_t caidvaluetab_get_value(CAIDVALUETAB *cv, uint16_t caid, uint16_t default_value);
- int32_t chk_is_fakecw(uint8_t *cw);
-diff --git a/oscam-conf-chk.c b/oscam-conf-chk.c
-index 39d86f0f..b3b615ea 100644
---- a/oscam-conf-chk.c
-+++ b/oscam-conf-chk.c
-@@ -225,10 +225,11 @@ void chk_cacheex_cwcheck_valuetab(char *lbrlt, CWCHECKTAB *tab)
- void chk_cacheex_hitvaluetab(char *lbrlt, CECSPVALUETAB *tab)
- {
- 	//[caid][&mask][@provid][$servid]
-+	int32_t i;
- 	char *ptr = NULL, *saveptr1 = NULL;
- 	cecspvaluetab_clear(tab);
- 
--	for(ptr = strtok_r(lbrlt, ",", &saveptr1); (ptr); ptr = strtok_r(NULL, ",", &saveptr1))
-+	for(i = 0, ptr = strtok_r(lbrlt, ",", &saveptr1); (ptr); ptr = strtok_r(NULL, ",", &saveptr1), i++)
- 	{
- 		CECSPVALUETAB_DATA d;
- 		memset(&d, 0, sizeof(d));
-@@ -267,10 +268,11 @@ void chk_cacheex_hitvaluetab(char *lbrlt, CECSPVALUETAB *tab)
- 
- void chk_tuntab(char *tunasc, TUNTAB *ttab)
- {
-+	int32_t i;
- 	tuntab_clear(ttab);
- 	errno = 0;
- 	char *caid_ptr, *savecaid_ptr = NULL;
--	for(caid_ptr = strtok_r(tunasc, ",", &savecaid_ptr); (caid_ptr); caid_ptr = strtok_r(NULL, ",", &savecaid_ptr))
-+	for(i = 0, caid_ptr = strtok_r(tunasc, ",", &savecaid_ptr); (caid_ptr); caid_ptr = strtok_r(NULL, ",", &savecaid_ptr), i++)
- 	{
- 		TUNTAB_DATA d;
- 		char *srvid_ptr  = strchr(trim(caid_ptr), '.');
-diff --git a/oscam-config-account.c b/oscam-config-account.c
-index bfdf1c58..99d43a99 100644
---- a/oscam-config-account.c
-+++ b/oscam-config-account.c
-@@ -77,8 +77,9 @@ static void account_allowedprotocols_fn(const char *token, char *value, void *se
- 		account->allowedprotocols = 0;
- 		if(cs_strlen(value) > 3)
- 		{
-+			int i;
- 			char *ptr, *saveptr1 = NULL;
--			for(ptr = strtok_r(value, ",", &saveptr1); ptr; ptr = strtok_r(NULL, ",", &saveptr1))
-+			for(i = 0, ptr = strtok_r(value, ",", &saveptr1); ptr; ptr = strtok_r(NULL, ",", &saveptr1), i++)
- 			{
- 				if(streq(ptr, "camd33"))        { account->allowedprotocols |= LIS_CAMD33TCP; }
- 				else if(streq(ptr, "camd35"))   { account->allowedprotocols |= LIS_CAMD35UDP; }
 diff --git a/oscam-config-global.c b/oscam-config-global.c
 index c6dd01c7..9044e568 100644
 --- a/oscam-config-global.c
@@ -13405,7 +12026,7 @@ index c6dd01c7..9044e568 100644
  	DEF_OPT_INT8("stream_reuse_client"           , OFS(stream_reuse_client),          0),
  #ifdef WEBIF
 diff --git a/oscam-config-reader.c b/oscam-config-reader.c
-index 30ba2329..1de2babf 100644
+index 222303cb..a4d7e0d5 100644
 --- a/oscam-config-reader.c
 +++ b/oscam-config-reader.c
 @@ -114,6 +114,7 @@ static void protocol_fn(const char *token, char *value, void *setting, FILE *f)
@@ -13416,7 +12037,7 @@ index 30ba2329..1de2babf 100644
  			{ NULL,         0 }
  		}, *p;
  		int i;
-@@ -682,6 +683,9 @@ void ftab_fn(const char *token, char *value, void *setting, long ftab_type, FILE
+@@ -690,6 +691,9 @@ void ftab_fn(const char *token, char *value, void *setting, long ftab_type, FILE
  		if(ftab_type & FTAB_FBPCAID)     { rdr = container_of(setting, struct s_reader, fallback_percaid); }
  		if(ftab_type & FTAB_LOCALCARDS)  { rdr = container_of(setting, struct s_reader, localcards); }
  		if(ftab_type & FTAB_IGNCHKSMCAID){ rdr = container_of(setting, struct s_reader, disablecrccws_only_for); }
@@ -13426,7 +12047,7 @@ index 30ba2329..1de2babf 100644
  #ifdef MODULE_GBOX
  		if(ftab_type & FTAB_CCCGBXRESHARE){ rdr = container_of(setting, struct s_reader, ccc_gbx_reshare_ident); }
  #endif
-@@ -1231,6 +1235,7 @@ static const struct config_list reader_opts[] =
+@@ -1259,6 +1263,7 @@ static const struct config_list reader_opts[] =
  	DEF_OPT_SSTR("cccversion"                     , OFS(cc_version),                      "", SIZEOF(cc_version)),
  	DEF_OPT_INT8("cccmaxhops"                     , OFS(cc_maxhops),                      DEFAULT_CC_MAXHOPS),
  	DEF_OPT_INT8("cccmindown"                     , OFS(cc_mindown),                      0),
@@ -13434,7 +12055,7 @@ index 30ba2329..1de2babf 100644
  	DEF_OPT_INT8("ccckeepalive"                   , OFS(cc_keepalive),                    DEFAULT_CC_KEEPALIVE),
  	DEF_OPT_INT8("cccreshare"                     , OFS(cc_reshare),                      DEFAULT_CC_RESHARE),
  	DEF_OPT_INT32("cccreconnect"                  , OFS(cc_reconnect),                    DEFAULT_CC_RECONNECT),
-@@ -1245,6 +1250,10 @@ static const struct config_list reader_opts[] =
+@@ -1273,6 +1278,10 @@ static const struct config_list reader_opts[] =
  #endif
  #ifdef READER_DRECAS
  	DEF_OPT_STR("stmkeys"                         , OFS(stmkeys),                         NULL),
@@ -13444,8 +12065,8 @@ index 30ba2329..1de2babf 100644
 +	DEF_OPT_INT8("emu_datecodedenabled"           , OFS(emu_datecodedenabled),           0),
  #endif
  	DEF_OPT_INT8("resetalways"                    , OFS(resetalways),                     0),
- 	DEF_OPT_INT8("deprecated"                     , OFS(deprecated),                      0),
-@@ -1341,7 +1350,7 @@ static bool reader_check_setting(const struct config_list *UNUSED(clist), void *
+ #ifdef WITH_CARDREADER
+@@ -1372,7 +1381,7 @@ static bool reader_check_setting(const struct config_list *UNUSED(clist), void *
  	// These are written only when the reader is CCCAM
  	static const char *cccam_settings[] =
  	{
@@ -13513,7 +12134,7 @@ index 4096513d..cb8ec85f 100644
  		cs_log_dbg(D_TRACE, "warning: ecm with null odd/even byte from %s", (check_client(er->client) ? er->client->account->usr : "-"));
  		er->rc = E_INVALID;
 diff --git a/oscam-emm.c b/oscam-emm.c
-index 296a5f09..1d3e1e3a 100644
+index 486d62c3..1bf94e52 100644
 --- a/oscam-emm.c
 +++ b/oscam-emm.c
 @@ -40,6 +40,7 @@ static int8_t cs_emmlen_is_blocked(struct s_reader *rdr, int16_t len)
@@ -13524,17 +12145,7 @@ index 296a5f09..1d3e1e3a 100644
  
  	//copied and enhanced from module-dvbapi.c
  	//dvbapi_start_emm_filter()
-@@ -51,9 +52,6 @@ static int8_t do_simple_emm_filter(struct s_reader *rdr, const struct s_cardsyst
- 	// Call cardsystems emm filter
- 	csystem->get_emm_filter(rdr, &dmx_filter, &filter_count);
- 
--	if(!dmx_filter)
--		{ return 0; }
--
- 	// Only check matching emmtypes:
- 	uint8_t org_emmtype;
- 	if(ep->type == UNKNOWN)
-@@ -240,6 +238,24 @@ int32_t emm_reader_match(struct s_reader *reader, uint16_t caid, uint32_t provid
+@@ -242,6 +243,24 @@ int32_t emm_reader_match(struct s_reader *reader, uint16_t caid, uint32_t provid
  		rdr_log_dbg(reader, D_EMM, "reader auprovid = %06X fixup to %06X (ignoring last digit)", reader->auprovid, prid);
  	}
  
@@ -13559,31 +12170,6 @@ index 296a5f09..1d3e1e3a 100644
  	if(prid == provid)
  	{
  		rdr_log_dbg(reader, D_EMM, "reader auprovid = %06X matching with emm provid = %06X -> SEND!", prid, provid);
-diff --git a/oscam-log.c b/oscam-log.c
-index a335369c..c1c6fb54 100644
---- a/oscam-log.c
-+++ b/oscam-log.c
-@@ -253,7 +253,10 @@ LLIST *log_history = NULL;
- */
- void cs_reinit_loghist(uint32_t size)
- {
--	cfg.loghistorylines = size;
-+	if(cfg.loghistorylines != size)
-+	{
-+		cfg.loghistorylines = size;
-+	}
- }
- #endif
- 
-@@ -267,7 +270,7 @@ static uint8_t get_log_header(char *txt, int32_t txt_size, uint8_t* hdr_logcount
- 	int32_t tmp;
- 
- 	cs_ftime(&log_ts);
--	time_t walltime = log_ts.time;
-+	time_t walltime = cs_walltime(&log_ts);
- 	localtime_r(&walltime, &lt);
- 
- 	tmp = snprintf(txt, txt_size, "[LOG000]%04d/%02d/%02d %02d:%02d:%02d %08X %c ",
 diff --git a/oscam-simples.c b/oscam-simples.c
 index 576804c9..6e1c7137 100644
 --- a/oscam-simples.c
@@ -13605,324 +12191,11 @@ index 576804c9..6e1c7137 100644
  	if(caid == 0x4ABF) { return "dgcrypt"; }
  	return "unknown";
  }
-diff --git a/oscam-string.c b/oscam-string.c
-index 76055a29..89121f84 100644
---- a/oscam-string.c
-+++ b/oscam-string.c
-@@ -45,7 +45,21 @@ bool cs_realloc(void *result, size_t size)
-  */
- size_t cs_strlen(const char *c)
- {
--	return c ? strlen(c) : 0;
-+	if (c == NULL)
-+	{
-+		return 0;
-+	}
-+	else
-+	{
-+		if (c[0] == '\0')
-+		{
-+			return 0;
-+		}
-+		else
-+		{
-+			return strlen(c);
-+		}
-+	}
- }
- 
- /* Allocates a new empty string and copies str into it. You need to free() the result. */
-@@ -150,7 +164,8 @@ char *strtolower(char *txt)
- 	char *p;
- 	for(p = txt; *p; p++)
- 	{
--		*p = tolower((uint8_t) *p);
-+		if(isupper((uint8_t)*p))
-+			{ *p = tolower((uint8_t) * p); }
- 	}
- 	return txt;
- }
-@@ -161,7 +176,8 @@ char *strtoupper(char *txt)
- 	char *p;
- 	for(p = txt; *p; p++)
- 	{
--		*p = toupper((uint8_t) *p);
-+		if(islower((uint8_t)*p))
-+			{ *p = toupper((uint8_t)*p); }
- 	}
- 	return txt;
- }
-diff --git a/oscam-time.c b/oscam-time.c
-index 996c77b5..0fceed5b 100644
---- a/oscam-time.c
-+++ b/oscam-time.c
-@@ -1,6 +1,8 @@
- #include "globals.h"
- #include "oscam-time.h"
- 
-+static enum clock_type clock_type = CLOCK_TYPE_UNKNOWN;
-+
- #if defined(CLOCKFIX)
- struct timeval lasttime; // holds previous time to detect systemtime adjustments due to eg transponder change on dvb receivers
- #endif
-@@ -168,13 +170,27 @@ void cs_ftimeus(struct timeb *tp)
- void cs_sleepms(uint32_t msec)
- {
- 	// does not interfere with signals like sleep and usleep do
--	struct timespec req_ts, rem_ts;
-+	struct timespec req_ts;
- 	req_ts.tv_sec = msec / 1000;
- 	req_ts.tv_nsec = (msec % 1000) * 1000000L;
- 	int32_t olderrno = errno; // Some OS (especially MacOSX) seem to set errno to ETIMEDOUT when sleeping
--	while (nanosleep(&req_ts, &rem_ts) == -1 && errno == EINTR)
-+	while (1)
- 	{
--		req_ts = rem_ts;
-+		/* Sleep for the time specified in req_ts. If interrupted by a
-+		signal, place the remaining time left to sleep back into req_ts. */
-+		int rval = nanosleep (&req_ts, &req_ts);
-+		if (rval == 0)
-+		{
-+			break; // Completed the entire sleep time; all done.
-+		}
-+		else if (errno == EINTR)
-+		{
-+			continue; // Interrupted by a signal. Try again.
-+		}
-+		else
-+		{
-+			break; // Some other error; bail out.
-+		}
- 	}
- 	errno = olderrno;
- }
-@@ -182,13 +198,28 @@ void cs_sleepms(uint32_t msec)
- void cs_sleepus(uint32_t usec)
- {
- 	// does not interfere with signals like sleep and usleep do
--	struct timespec req_ts, rem_ts;
-+	struct timespec req_ts;
- 	req_ts.tv_sec = usec / 1000000;
- 	req_ts.tv_nsec = (usec % 1000000) * 1000L;
- 	int32_t olderrno = errno; // Some OS (especially MacOSX) seem to set errno to ETIMEDOUT when sleeping
--	while (nanosleep(&req_ts, &rem_ts) == -1 && errno == EINTR)
-+
-+	while (1)
- 	{
--		req_ts = rem_ts;
-+		/* Sleep for the time specified in req_ts. If interrupted by a
-+		signal, place the remaining time left to sleep back into req_ts. */
-+		int rval = nanosleep (&req_ts, &req_ts);
-+		if (rval == 0)
-+		{
-+			break; // Completed the entire sleep time; all done.
-+		}
-+		else if (errno == EINTR)
-+		{
-+			continue; // Interrupted by a signal. Try again.
-+		}
-+		else
-+		{
-+			break; // Some other error; bail out.
-+		}
- 	}
- 	errno = olderrno;
- }
-@@ -238,10 +269,48 @@ int64_t add_ms_to_timeb_diff(struct timeb *tb, int32_t ms)
- 	return comp_timeb(tb, &tb_now);
- }
- 
-+#if defined(__UCLIBC__)
-+#define __UCLIBC_VER (__UCLIBC_MAJOR__ * 10000 + __UCLIBC_MINOR__ * 100 + __UCLIBC_SUBLEVEL__)
-+#else
-+#define __UCLIBC_VER 999999
-+#endif
-+
-+#if defined(__GLIBC__)
-+#define __GLIBCVER (__GLIBC__ * 100 + __GLIBC_MINOR__)
-+#else
-+#define __GLIBCVER 9999
-+#endif
-+
-+// Assume we have HAVE_pthread_condattr_setclock if CLOCK_MONOTONIC is defined
-+#if defined(CLOCKFIX) && defined(CLOCK_MONOTONIC)
-+#define HAVE_pthread_condattr_setclock 1
-+#endif
-+
-+#if defined(HAVE_pthread_condattr_setclock)
-+// UCLIBC 0.9.31 does not have pthread_condattr_setclock
-+#if __UCLIBC_VER < 932
-+#undef HAVE_pthread_condattr_setclock
-+#endif
-+// glibc 2.3.6 in ppc old toolchain do not have pthread_condattr_setclock
-+#if __GLIBCVER < 204
-+#undef HAVE_pthread_condattr_setclock
-+#endif
-+// android's libc not have pthread_condattr_setclock
-+#if __BIONIC__
-+#undef HAVE_pthread_condattr_setclock
-+#endif
-+#endif
-+
- void __cs_pthread_cond_init(const char *n, pthread_cond_t *cond)
- {
- 	pthread_condattr_t attr;
- 	SAFE_CONDATTR_INIT_R(&attr, n); // init condattr with defaults
-+#if 0
-+#if defined(HAVE_pthread_condattr_setclock)
-+	enum clock_type ctype = cs_getclocktype();
-+	SAFE_CONDATTR_SETCLOCK_R(&attr, (ctype == CLOCK_TYPE_MONOTONIC) ? CLOCK_MONOTONIC : CLOCK_REALTIME, n);
-+#endif
-+#endif
- 	SAFE_COND_INIT_R(cond, &attr, n); // init thread with right clock assigned
- 	pthread_condattr_destroy(&attr);
- }
-@@ -250,10 +319,17 @@ void __cs_pthread_cond_init_nolog(const char *n, pthread_cond_t *cond)
- {
- 	pthread_condattr_t attr;
- 	SAFE_CONDATTR_INIT_NOLOG_R(&attr, n); // init condattr with defaults
-+#if 0
-+#if defined(HAVE_pthread_condattr_setclock)
-+	enum clock_type ctype = cs_getclocktype();
-+	SAFE_CONDATTR_SETCLOCK_NOLOG_R(&attr, (ctype == CLOCK_TYPE_MONOTONIC) ? CLOCK_MONOTONIC : CLOCK_REALTIME, n);
-+#endif
-+#endif
- 	SAFE_COND_INIT_NOLOG_R(cond, &attr, n); // init thread with right clock assigned
- 	pthread_condattr_destroy(&attr);
- }
- 
-+
- void sleepms_on_cond(const char *n, pthread_mutex_t *mutex, pthread_cond_t *cond, uint32_t msec)
- {
- 	struct timespec ts;
-@@ -275,12 +351,35 @@ void cs_pthread_cond_init_nolog(const char *n, pthread_mutex_t *mutex, pthread_c
- 	__cs_pthread_cond_init(n, cond);
- }
- 
-+enum clock_type cs_getclocktype(void) {
-+	if (clock_type == CLOCK_TYPE_UNKNOWN) {
-+		struct timespec ts;
-+		cs_gettime(&ts); // init clock type
-+	}
-+	return clock_type;
-+}
-+
-+time_t cs_walltime(struct timeb *tp)
-+{
-+	// we dont need to fetch time again and calculate if oscam is already using realtimeclock!
-+	if (clock_type != CLOCK_TYPE_MONOTONIC)
-+		return tp->time;
-+
-+	struct timespec ts;
-+	struct timeval tv;
-+
-+	cs_gettime(&ts);
-+	gettimeofday(&tv, NULL);
-+	int64_t skew = tv.tv_sec - ts.tv_sec;
-+	return(tp->time + skew);
-+}
-+
- /* Return real time clock value calculated based on cs_gettime(). Use this instead of time() */
- time_t cs_time(void)
- {
- 	struct timeb tb;
- 	cs_ftime(&tb);
--	return tb.time;
-+	return cs_walltime(&tb);
- }
- 
- #ifdef __MACH__
-@@ -306,5 +405,39 @@ void cs_gettime(struct timespec *ts)
- #endif
- 	ts->tv_sec = tv.tv_sec;
- 	ts->tv_nsec = tv.tv_usec * 1000;
-+	clock_type = CLOCK_TYPE_REALTIME;
-+	return;
-+#if 0
-+#if !defined(CLOCKFIX) || (!defined(CLOCK_MONOTONIC) && !defined(__MACH__))
-+	struct timeval tv;
-+	gettimeofday(&tv, NULL);
-+	ts->tv_sec = tv.tv_sec;
-+	ts->tv_nsec = tv.tv_usec * 1000;
-+	clock_type = CLOCK_TYPE_REALTIME;
- 	return;
-+#elif defined (__MACH__)
-+// OS X does not have clock_gettime, use clock_get_time
-+	clock_serv_t cclock;
-+	mach_timespec_t mts;
-+	host_get_clock_service(mach_host_self(), CALENDAR_CLOCK, &cclock);
-+	clock_get_time(cclock, &mts);
-+	mach_port_deallocate(mach_task_self(), cclock);
-+	ts->tv_sec = mts.tv_sec;
-+	ts->tv_nsec = mts.tv_nsec;
-+	clock_type = CLOCK_TYPE_REALTIME;
-+#else
-+	if (clock_type == CLOCK_TYPE_REALTIME) // monotonic returned error
-+	{
-+		clock_gettime(CLOCK_REALTIME, ts);
-+		return;
-+	}
-+	int32_t	ret = clock_gettime(CLOCK_MONOTONIC, ts);
-+	clock_type = CLOCK_TYPE_MONOTONIC;
-+	if ((ret < 0 && errno == EINVAL)) // Error fetching time from this source (Shouldn't happen on modern Linux)
-+	{
-+		clock_gettime(CLOCK_REALTIME, ts);
-+		clock_type = CLOCK_TYPE_REALTIME;
-+	}
-+#endif
-+#endif
- }
-diff --git a/oscam-time.h b/oscam-time.h
-index 50fa5c27..d04f64b4 100644
---- a/oscam-time.h
-+++ b/oscam-time.h
-@@ -1,6 +1,12 @@
- #ifndef OSCAM_TIME_H_
- #define OSCAM_TIME_H_
- 
-+enum clock_type {
-+	CLOCK_TYPE_UNKNOWN,
-+	CLOCK_TYPE_REALTIME,
-+	CLOCK_TYPE_MONOTONIC,
-+};
-+
- int64_t comp_timeb(struct timeb *tpa, struct timeb *tpb);
- int64_t comp_timebus(struct timeb *tpa, struct timeb *tpb);
- time_t cs_timegm(struct tm *tm);
-@@ -15,12 +21,15 @@ void add_ms_to_timespec(struct timespec *timeout, int32_t msec);
- void add_ms_to_timeb(struct timeb *tb, int32_t ms);
- int64_t add_ms_to_timeb_diff(struct timeb *tb, int32_t ms);
- 
-+time_t cs_walltime(struct timeb *tp);
- time_t cs_time(void);
- 
- static inline bool cs_valid_time(struct timeb *tp) { return tp->time != 0; }
- 
- void cs_gettime(struct timespec *ts);
- 
-+enum clock_type cs_getclocktype(void);
-+
- void __cs_pthread_cond_init(const char *n, pthread_cond_t *cond);
- void cs_pthread_cond_init(const char *n, pthread_mutex_t *mutex, pthread_cond_t *cond);
- 
-diff --git a/oscam-work.c b/oscam-work.c
-index d0592c38..bee981dc 100644
---- a/oscam-work.c
-+++ b/oscam-work.c
-@@ -304,8 +304,6 @@ void *work_thread(void *ptr)
- 
- 				case ACTION_READER_SENDCMD:
- #ifdef WITH_CARDREADER
--					if (!reader)
--						{ break; }
- 					dblvl = cs_dblevel;
- 					cs_dblevel = dblvl | D_READER;
- 					rc = cardreader_do_rawcmd(reader, data->ptr);
 diff --git a/oscam.c b/oscam.c
-index a647a53b..3262577e 100644
+index 1385bd0d..4397bb88 100644
 --- a/oscam.c
 +++ b/oscam.c
-@@ -41,6 +41,10 @@
+@@ -44,6 +44,10 @@
  #include "reader-common.h"
  #include "module-gbox.h"
  
@@ -13933,21 +12206,7 @@ index a647a53b..3262577e 100644
  #ifdef WITH_SSL
  #include <openssl/crypto.h>
  #include <openssl/ssl.h>
-@@ -445,7 +449,12 @@ static void write_versionfile(bool use_stdout)
- 	write_conf(CW_CYCLE_CHECK, "CW Cycle Check support");
- 	write_conf(LCDSUPPORT, "LCD support");
- 	write_conf(LEDSUPPORT, "LED support");
--	write_conf(CLOCKFIX, "Clockfix with realtime clock");
-+	switch (cs_getclocktype())
-+	{
-+		case CLOCK_TYPE_UNKNOWN  : write_conf(CLOCKFIX, "Clockfix with UNKNOWN clock"); break;
-+		case CLOCK_TYPE_REALTIME : write_conf(CLOCKFIX, "Clockfix with realtime clock"); break;
-+		case CLOCK_TYPE_MONOTONIC: write_conf(CLOCKFIX, "Clockfix with monotonic clock"); break;
-+	}
- 	write_conf(IPV6SUPPORT, "IPv6 support");
- #if defined(__arm__) || defined(__aarch64__)
- 	write_conf(WITH_ARM_NEON, "ARM NEON (SIMD/MPE) support");
-@@ -453,6 +462,8 @@ static void write_versionfile(bool use_stdout)
+@@ -457,6 +461,8 @@ static void write_versionfile(bool use_stdout)
  #ifdef WITH_SIGNING
  	write_conf(WITH_SIGNING, "Binary signing support");
  #endif
@@ -13956,61 +12215,7 @@ index a647a53b..3262577e 100644
  
  	fprintf(fp, "\n");
  	write_conf(MODULE_CAMD33, "camd 3.3x");
-@@ -494,7 +505,6 @@ static void write_versionfile(bool use_stdout)
- 		write_cardreaderconf(CARDREADER_INTERNAL_AZBOX, "internal_azbox");
- 		write_cardreaderconf(CARDREADER_INTERNAL_COOLAPI, "internal_coolapi");
- 		write_cardreaderconf(CARDREADER_INTERNAL_COOLAPI2, "internal_coolapi2");
--		write_cardreaderconf(CARDREADER_INTERNAL_AMSMC, "internal_amsmc");
- 		write_cardreaderconf(CARDREADER_INTERNAL_SCI, "internal_sci");
- 		write_cardreaderconf(CARDREADER_SC8IN1, "sc8in1");
- 		write_cardreaderconf(CARDREADER_MP35, "mp35");
-@@ -664,20 +674,14 @@ static void cs_dumpstack(int32_t sig)
- 
- 	fprintf(stderr, "crashed with signal %d on %swriting oscam.crash\n", sig, buf);
- 
--	if (fp)
--	{
--		fprintf(fp, "%sOSCam cardserver v%s@%s (%s)\n", buf, CS_VERSION, CS_GIT_COMMIT, CS_TARGET);
--		fprintf(fp, "FATAL: Signal %d: %s Fault. Logged StackTrace:\n\n", sig, (sig == SIGSEGV) ? "Segmentation" : ((sig == SIGBUS) ? "Bus" : "Unknown"));
--		fclose(fp);
--	}
-+	fprintf(fp, "%sOSCam cardserver v%s@%s (%s)\n", buf, CS_VERSION, CS_GIT_COMMIT, CS_TARGET);
-+	fprintf(fp, "FATAL: Signal %d: %s Fault. Logged StackTrace:\n\n", sig, (sig == SIGSEGV) ? "Segmentation" : ((sig == SIGBUS) ? "Bus" : "Unknown"));
-+	fclose(fp);
- 
- 	FILE *cmd = fopen("/tmp/gdbcmd", "w");
--	if (cmd)
--	{
--		fputs("bt\n", cmd);
--		fputs("thread apply all bt\n", cmd);
--		fclose(cmd);
--	}
-+	fputs("bt\n", cmd);
-+	fputs("thread apply all bt\n", cmd);
-+	fclose(cmd);
- 
- 	snprintf(buf, sizeof(buf) - 1, "gdb %s %d -batch -x /tmp/gdbcmd >> oscam.crash", prog_name, getpid());
- 	if(system(buf) == -1)
-@@ -1570,8 +1574,8 @@ static void detect_valgrind(void)
- 				break;
- 			}
- 		}
--		fclose(f);
- 	}
-+	fclose(f);
- #endif
- }
- 
-@@ -1646,8 +1650,6 @@ const struct s_cardreader *cardreaders[] =
- 	&cardreader_internal_cool,
- #elif defined(CARDREADER_INTERNAL_COOLAPI2)
- 	&cardreader_internal_cool,
--#elif defined(CARDREADER_INTERNAL_AMSMC)
--	&cardreader_internal_amsmc,
- #elif defined(CARDREADER_INTERNAL_SCI)
- 	&cardreader_internal_sci,
- #endif
-@@ -1678,6 +1680,9 @@ const struct s_cardreader *cardreaders[] =
+@@ -1682,6 +1688,9 @@ const struct s_cardreader *cardreaders[] =
  #ifdef CARDREADER_STINGER
  	&cardreader_stinger,
  #endif
@@ -14020,16 +12225,7 @@ index a647a53b..3262577e 100644
  
  	NULL
  };
-@@ -1730,6 +1735,8 @@ int32_t main(int32_t argc, char *argv[])
- 	run_tests();
- 	int32_t i, j;
- 	prog_name = argv[0];
-+	struct timespec start_ts;
-+	cs_gettime(&start_ts); // Initialize clock_type
- 
- 	if(pthread_key_create(&getclient, NULL))
- 	{
-@@ -1857,6 +1864,9 @@ int32_t main(int32_t argc, char *argv[])
+@@ -1861,6 +1870,9 @@ int32_t main(int32_t argc, char *argv[])
  
  	init_sidtab();
  	init_readerdb();
@@ -14040,7 +12236,7 @@ index a647a53b..3262577e 100644
  	init_signal();
  	init_provid();
 diff --git a/reader-common.c b/reader-common.c
-index efdd19b3..2c8fc7dd 100644
+index bc036210..8bc32839 100644
 --- a/reader-common.c
 +++ b/reader-common.c
 @@ -15,6 +15,7 @@
@@ -14051,7 +12247,7 @@ index efdd19b3..2c8fc7dd 100644
  
  extern const struct s_cardsystem *cardsystems[];
  extern char *RDR_CD_TXT[];
-@@ -150,6 +151,18 @@ static int32_t reader_get_cardsystem(struct s_reader *reader, ATR *atr)
+@@ -152,6 +153,18 @@ static int32_t reader_get_cardsystem(struct s_reader *reader, ATR *atr)
  {
  	int32_t i;
  
@@ -14070,310 +12266,6 @@ index efdd19b3..2c8fc7dd 100644
  	for(i = 0; cardsystems[i]; i++)
  	{
  		NULLFREE(reader->csystem_data);
-diff --git a/reader-conax.c b/reader-conax.c
-index f0f28171..3b08ade2 100644
---- a/reader-conax.c
-+++ b/reader-conax.c
-@@ -6,47 +6,86 @@
- 
- static int32_t CWPK_CNX(struct s_reader *reader,uint8_t *msg)
- {
--	uint8_t CWp[16], CWs[16];
--
--	memcpy(CWp, msg + 7, 8);
--	memcpy(CWp + 8, msg + 22, 8);
--
--	des_ecb3_decrypt(CWp, reader->cwpk_mod);
--	des_ecb3_decrypt(CWp + 8, reader->cwpk_mod);
--
--	memcpy(CWs, CWp + 4, 4);
--	memcpy(CWs + 4, CWp, 4);
--	memcpy(CWs + 8, CWp + 12, 4);
--	memcpy(CWs + 12, CWp + 8, 4);
-+int32_t ret = 0;
-+
-+uint8_t CWp1[8];
-+uint8_t CWp2[8];
-+uint8_t CWs1[8];
-+uint8_t CWs2[8];
-+
-+CWp1[0] = msg[7];
-+CWp1[1] = msg[8];
-+CWp1[2] = msg[9];
-+CWp1[3] = msg[10];
-+CWp1[4] = msg[11];
-+CWp1[5] = msg[12];
-+CWp1[6] = msg[13];
-+CWp1[7] = msg[14];
-+
-+CWp2[0] = msg[22];
-+CWp2[1] = msg[23];
-+CWp2[2] = msg[24];
-+CWp2[3] = msg[25];
-+CWp2[4] = msg[26];
-+CWp2[5] = msg[27];
-+CWp2[6] = msg[28];
-+CWp2[7] = msg[29];
-+
-+des_ecb3_decrypt(CWp1,reader->cwpk_mod);
-+des_ecb3_decrypt(CWp2,reader->cwpk_mod);
-+CWs1[0] = CWp1[4];
-+CWs1[1] = CWp1[5];
-+CWs1[2] = CWp1[6];
-+CWs1[3] = CWp1[7];
-+CWs1[4] = CWp1[0];
-+CWs1[5] = CWp1[1];
-+CWs1[6] = CWp1[2];
-+CWs1[7] = CWp1[3];
-+
-+CWs2[0] = CWp2[4];
-+CWs2[1] = CWp2[5];
-+CWs2[2] = CWp2[6];
-+CWs2[3] = CWp2[7];
-+CWs2[4] = CWp2[0];
-+CWs2[5] = CWp2[1];
-+CWs2[6] = CWp2[2];
-+CWs2[7] = CWp2[3];
-+
-+int chkok = 1;
-+if(((CWs1[0] + CWs1[1] + CWs1[2]) & 0xFF) != CWs1[3])
-+{
-+	chkok = 0;
-+	rdr_log(reader, "CW0 checksum error [0]");
-+}
-+if(((CWs1[4] + CWs1[5] + CWs1[6]) & 0xFF) != CWs1[7])
-+{
-+	chkok = 0;
-+	rdr_log(reader, "CW0 checksum error [1]");
-+}
-+if(((CWs2[0] + CWs2[1] + CWs2[2]) & 0xFF) != CWs2[3])
-+{
-+	chkok = 0;
-+	rdr_log(reader, "CW1 checksum error [0]");
-+}
-+if(((CWs2[4] + CWs2[5] + CWs2[6]) & 0xFF) != CWs2[7])
-+{
-+	chkok = 0;
-+	rdr_log(reader, "CW1 checksum error [1]");
-+}
- 
--	int chkok = 1;
--	if(((CWs[0] + CWs[1] + CWs[2]) & 0xFF) != CWs[3])
--	{
--		chkok = 0;
--		rdr_log(reader, "CW0 checksum error [0]");
--	}
--	if(((CWs[4] + CWs[5] + CWs[6]) & 0xFF) != CWs[7])
--	{
--		chkok = 0;
--		rdr_log(reader, "CW0 checksum error [1]");
--	}
--	if(((CWs[8] + CWs[9] + CWs[10]) & 0xFF) != CWs[11])
--	{
--		chkok = 0;
--		rdr_log(reader, "CW1 checksum error [0]");
--	}
--	if(((CWs[12] + CWs[13] + CWs[14]) & 0xFF) != CWs[15])
--	{
--		chkok = 0;
--		rdr_log(reader, "CW1 checksum error [1]");
--	}
-+if(chkok == 1)
-+{
-+	memcpy(&msg[7],CWs1,0x08);
-+	memcpy(&msg[22],CWs2,0x08);
- 
--	if(!chkok)
--		return -8;
-+	ret = 0;
-+}
-+if(chkok != 1)
-+{
-+	ret = -8;
-+}
- 
--	memcpy(msg + 7, CWs, 8);
--	memcpy(msg + 22, CWs + 8, 8);
--	return 0;
-+return ret;
- }
- 
- static int32_t RSA_CNX(struct s_reader *reader, uint8_t *msg, uint8_t *mod, uint8_t *exp, uint32_t cta_lr, uint32_t modbytes, uint32_t expbytes)
-@@ -71,7 +110,6 @@ static int32_t RSA_CNX(struct s_reader *reader, uint8_t *msg, uint8_t *mod, uint
- 		if(ctx == NULL)
- 		{
- 			rdr_log_dbg(reader, D_READER, "RSA Error in RSA_CNX");
--			return -1;
- 		}
- 
- 		BN_CTX_start(ctx);
-diff --git a/reader-dre-cas.c b/reader-dre-cas.c
-index 6ac03418..642a27e8 100644
---- a/reader-dre-cas.c
-+++ b/reader-dre-cas.c
-@@ -539,10 +539,6 @@ static int32_t drecas_card_init(struct s_reader *reader, ATR *newatr)
- 		int cmd_len;
- 		int n;
- 		char *tempbuf = malloc(2048);
--		if (!tempbuf)
--		{
--			return ERROR;
--		}
- 		trim2(reader->userscript);
- 		FILE *pFile = fopen(reader->userscript, "rt");
- 
-@@ -565,11 +561,6 @@ static int32_t drecas_card_init(struct s_reader *reader, ATR *newatr)
- 
- 				cmd_len = cs_strlen(tempbuf) / 2 - 3;
- 				usercmd = malloc(cmd_len);
--				if (!usercmd)
--				{
--					free(tempbuf);
--					return ERROR;
--				}
- 
- 				for(i = 0, n = 4; i < cmd_len; i++, n += 2)
- 				{
-diff --git a/reader-dre-st20.c b/reader-dre-st20.c
-index e0170621..d605cde8 100644
---- a/reader-dre-st20.c
-+++ b/reader-dre-st20.c
-@@ -32,11 +32,12 @@ typedef struct
- 	int sptr, stack[STACKMAX];
- 	uint8_t iram[0x1800];
- 	int invalid;
-+	int verbose;
- } st20_context_t;
- 
- static bool st20_set_flash(st20_context_t *ctx, uint8_t *m, uint32_t len);
- static bool st20_set_ram(st20_context_t *ctx, uint8_t *m, uint32_t len);
--static void st20_init(st20_context_t *ctx, uint32_t IPtr, uint32_t WPtr);
-+static void st20_init(st20_context_t *ctx, uint32_t IPtr, uint32_t WPtr, int verbose);
- static void st20_free(st20_context_t *ctx);
- 
- static void st20_set_call_frame(st20_context_t *ctx, uint32_t raddr, int p1, int p2, int p3);
-@@ -48,7 +49,7 @@ static void st20_wbyte(st20_context_t *ctx, uint32_t off, uint8_t val);
- static uint32_t st20_rword(st20_context_t *ctx, uint32_t off);
- static void st20_wword(st20_context_t *ctx, uint32_t off, uint32_t val);
- 
--#define INVALID_VALUE 0xCC
-+#define INVALID_VALUE 0xCCCCCCCC
- #define ERRORVAL      0xDEADBEEF
- 
- #define MININT        0x7FFFFFFF
-@@ -367,13 +368,14 @@ static bool st20_set_ram(st20_context_t *ctx, uint8_t *m, uint32_t len)
- 	return true;
- }
- 
--static void st20_init(st20_context_t *ctx, uint32_t IPtr, uint32_t WPtr)
-+static void st20_init(st20_context_t *ctx, uint32_t IPtr, uint32_t WPtr, int32_t verbose)
- {
- 	ctx->Wptr = WPtr;
- 	ctx->Iptr = IPtr;
- 	memset(ctx->stack, INVALID_VALUE, sizeof(ctx->stack));
- 	ctx->sptr = STACKMAX - 3;
- 	memset(ctx->iram, 0, sizeof(ctx->iram));
-+	ctx->verbose = verbose;
- }
- 
- static void st20_free(st20_context_t *ctx)
-@@ -429,7 +431,7 @@ int st20_run(uint8_t* snip, uint32_t snip_len, int addr, uint8_t *data, uint16_t
- 			error = FLA_ERR;
- 			break;
- 		}
--		st20_init(&ctx, FLASHS + addr, RAMS + 0x100);
-+		st20_init(&ctx, FLASHS + addr, RAMS + 0x100, 1);
- 		st20_set_call_frame(&ctx, 0, RAMS, RAMS, RAMS);
- 
- 		for(i = 0; i < 8; i++)
-diff --git a/reader-dre.c b/reader-dre.c
-index 2d1b074d..0cafe07e 100644
---- a/reader-dre.c
-+++ b/reader-dre.c
-@@ -632,12 +632,6 @@ static int32_t dre_card_init(struct s_reader *reader, ATR *newatr)
- 
- 				cmd_len = cs_strlen(tempbuf) / 2 - 3 + ignoreProvid - (crypted * 2);
- 				usercmd = malloc(cmd_len);
--				if (!usercmd)
--				{
--					free(tempbuf);
--					fclose(pFile);
--					return ERROR;
--				}
- 
- 				for(i = 0, n = 4 + (crypted * 4); i < cmd_len; i++, n += 2)
- 				{
-@@ -657,7 +651,6 @@ static int32_t dre_card_init(struct s_reader *reader, ATR *newatr)
- 				rdr_log(reader, "Script %s", ({dre_script_nb(usercmd, cmd_len, ignoreProvid, crypted, cryptkey)}) ? "done" : "error");
- 			}
- 			while(!feof(pFile));
--			fclose(pFile);
- 		}
- 		else
- 		{
-diff --git a/reader-nagra.c b/reader-nagra.c
-index 609444c0..3e67b77d 100644
---- a/reader-nagra.c
-+++ b/reader-nagra.c
-@@ -877,6 +877,7 @@ static int32_t nagra2_card_init(struct s_reader *reader, ATR *newatr)
- 				return ERROR;
- 			}
- 		}
-+		NULLFREE(reader->csystem_data);
- 		return ERROR; // quitting csystem still not having needed commands to run on nagra layer
- 	}
- 	else
-diff --git a/reader-nagracak7.c b/reader-nagracak7.c
-index 3cd4541c..5b64ec3d 100644
---- a/reader-nagracak7.c
-+++ b/reader-nagracak7.c
-@@ -1,5 +1,6 @@
- #include "globals.h"
- #ifdef READER_NAGRA_MERLIN
-+#include "math.h"
- #include "cscrypt/bn.h"
- #include "cscrypt/idea.h"
- #include "csctapi/icc_async.h"
-@@ -631,10 +632,10 @@ static int32_t ParseDataType(struct s_reader *reader, uint8_t dt, uint8_t *cta_r
- 	return ERROR;
- }
- 
--static int32_t CAK7do_cmd(struct s_reader *reader, uint8_t dt, uint8_t *res, uint16_t *rlen, int32_t sub, uint8_t retlen)
-+static int32_t CAK7do_cmd(struct s_reader *reader, uint8_t dt, uint8_t len, uint8_t *res, uint16_t *rlen, int32_t sub, uint8_t retlen)
- {
- 	uint8_t dtdata[0x10];
--	memset(dtdata, 0xCC, 0x10);
-+	memset(dtdata, 0xCC, len);
- 	dtdata[ 7] = 0x04;
- 	dtdata[ 8] = 0x04;
- 	dtdata[ 9] = (sub >> 16) & 0xFF;
-@@ -655,7 +656,7 @@ static int32_t CAK7GetDataType(struct s_reader *reader, uint8_t dt)
- 
- 	while(1)
- 	{
--		CAK7do_cmd(reader, dt, cta_res, &cta_lr, sub, retlen);
-+		CAK7do_cmd(reader, dt, 0x10, cta_res, &cta_lr, sub, retlen);
- 		rdr_log_dump_dbg(reader, D_READER, cta_res, cta_lr, "Decrypted Answer:");
- 
- 		// hier eigentlich check auf 90 am ende usw... obs halt klarging ...
-@@ -705,8 +706,15 @@ static int32_t CAK7GetDataType(struct s_reader *reader, uint8_t dt)
- 
- static void sub_6AD78(uint32_t *dinit) // gbox function
- {
--	double res = *dinit * 16807.0;
--	*dinit = (uint32_t)(res - (uint32_t)(res / 2147483647.0) * 2147483647.0);
-+	uint32_t v0 = (uint32_t) * dinit;
-+	double f0;
-+	f0 = v0;
-+	double f12 = 16807;
-+	double f15 = 2147483647;
-+	f12 = f0 * f12;
-+	double v12;
-+	v12 = fmod(f12, f15);
-+	*dinit = v12;
- }
- 
- static void calc_cak7_exponent(uint32_t *dinit, uint8_t *out, uint8_t len)
 diff --git a/readers.h b/readers.h
 index eec350e9..316c2bea 100644
 --- a/readers.h
@@ -14440,24 +12332,54 @@ index 00000000..cf718779
 +++ b/webif/files/menu_softcamkey.html
 @@ -0,0 +1 @@
 +			<LI CLASS="##CMENUACTIVE30##"><A HREF="files.html?file=SoftCam.Key">SoftCam.Key</A></LI>
-diff --git a/webif/pages_gen.c b/webif/pages_gen.c
-index e18c77ba..7703f87f 100644
---- a/webif/pages_gen.c
-+++ b/webif/pages_gen.c
-@@ -472,10 +472,9 @@ int main(void)
- 	int r = lzo1x_1_compress(data, in_len, out, &out_len, wrkmem);
- 	if(r == LZO_E_OK)
- 	{
--		int64_t saved_bytes = (int64_t)in_len - (int64_t)out_len;
- 		printf("GEN\tCompressed %lu template bytes into %lu bytes. %" PRId64 " saved bytes (%.2f%%).\n",
- 				(unsigned long)in_len, (unsigned long)out_len,
--				saved_bytes, 100 - ((float)out_len / in_len) * 100);
-+				(long)in_len - (long)out_len, 100 - ((float)out_len / in_len) * 100);
- 	}
- 	else
- 	{
+diff --git a/webif/include/css.css b/webif/include/css.css
+index 407006dc..46b81ff1 100644
+--- a/webif/include/css.css
++++ b/webif/include/css.css
+@@ -583,22 +583,18 @@ div.footer {
+ 	border-top:3px solid #CCC
+ }
+ div.footer .top_link {
++	padding-left:12px;
+ 	position:absolute;
++	font-weight:bold;
+ 	bottom:5px;
+-	right:10px;
+-	font-weight:bold
+-}
+-div.footer .top_link a:after {
+-	content:" \25B2"
++	left:7px;
++	z-index:0
+ }
+-LI.bottom_link {
++div.footer .top_link a:before {
++	content:"▲";
++	font-weight:normal;
+ 	position:absolute;
+-	top:6px;
+-	right:10px;
+-	font-weight:bold
+-}
+-LI.bottom_link a:after {
+-	content:" \25BC"
++	left:1px
+ }
+ div.footer li {
+ 	margin:5px
+diff --git a/webif/include/menu.html b/webif/include/menu.html
+index 429be370..0a1c1d99 100644
+--- a/webif/include/menu.html
++++ b/webif/include/menu.html
+@@ -12,5 +12,4 @@
+ 				<LI CLASS="##MENUACTIVE9##"><A HREF="script.html">Scripts</A></LI>
+ 				<LI CLASS="##MENUACTIVE10##"><A HREF="shutdown.html">Restart</A></LI>
+ 			</UL>
+-			<LI CLASS="bottom_link"><A HREF="#statusfooter" TITLE="Bottom of Page">BOTTOM</A></LI>
+ 		</DIV>
+\ No newline at end of file
 diff --git a/webif/pages_index.txt b/webif/pages_index.txt
-index a104089b..fd1c857e 100644
+index fbf1d18b..654fc692 100644
 --- a/webif/pages_index.txt
 +++ b/webif/pages_index.txt
 @@ -1,10 +1,10 @@
@@ -14524,25 +12446,3 @@ index 00000000..8c130b7c
 @@ -0,0 +1,2 @@
 +			<TR><TD><A>AU providers:</A></TD><TD><textarea name="emu_auproviders" rows="3" class="bt">##EMUAUPROVIDERS##</textarea></TD></TR>
 +			<TR><TD><A>[BISS] Enable date-coded keys:</A></TD><TD><input name="emu_datecodedenabled" type="hidden" value="0"><input name="emu_datecodedenabled" type="checkbox" value="1" ##EMUDATECODEDENABLED##><label></label></TD></TR>
-diff --git a/webif/services/services.html b/webif/services/services.html
-index 2071b292..c4b993ed 100644
---- a/webif/services/services.html
-+++ b/webif/services/services.html
-@@ -15,7 +15,6 @@
- 	</DIV>
- 	<TABLE ID="servicesedit">
- 		<TR>
--			<TH CLASS="centered">#</TH>
- 			<TH CLASS="centered">Label</TH>
- 			<TH CLASS="centered">Overview</TH>
- 			<TH COLSPAN="2" CLASS="centered">Action</TH>
-diff --git a/webif/services/services_servicetabs.html b/webif/services/services_servicetabs.html
-index a46b7089..d69f1f3f 100644
---- a/webif/services/services_servicetabs.html
-+++ b/webif/services/services_servicetabs.html
-@@ -1,5 +1,4 @@
- 			<TR>
--				<TD CLASS="centered">##SERVICENUM##</TD>
- 				<TD>##LABEL##</TD>
- 				<TD>
- ##SIDLIST##
